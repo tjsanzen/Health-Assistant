@@ -280,6 +280,7 @@ class HealthAssistantPanel extends HTMLElement {
         setTimeout(() => { this._syncViewport(); e.target.scrollIntoView({ block: "center", behavior: "smooth" }); }, 350);
       });
       root.addEventListener("focusout", () => setTimeout(() => this._syncViewport(), 100));
+      root.addEventListener("pointerdown", () => this._unlockAudio());
       root.addEventListener("touchstart", (e) => this._dragStart(e), { passive: true });
       root.addEventListener("touchmove", (e) => this._dragMove(e), { passive: false });
       root.addEventListener("touchend", () => this._dragEnd());
@@ -300,7 +301,10 @@ class HealthAssistantPanel extends HTMLElement {
     const btn = (t) => {
       const on = s.tab === t.id;
       const isW = t.id === "workout";
-      const label = isW && s.active ? `<span data-elapsed>${fmtDur(this._elapsed())}</span>` : t.label;
+      // While a workout is running, the centre button shows the rest countdown when resting
+      // (and nothing ticking otherwise) — the workout clock lives in the workout header.
+      const rest = s.active?.rest;
+      const label = isW && s.active ? (rest ? `Rest <span data-restnav>${fmtDur(Math.max(0, rest.ends_at - now()))}</span>` : "Workout") : t.label;
       return `<button class="navbtn ${on ? "on" : ""} ${isW ? "center" : ""}" data-action="tab" data-tab="${t.id}">
         <span class="navicon">${icon(isW && s.active ? "mdi:dumbbell" : t.icon)}</span><span class="navlabel">${label}</span></button>`;
     };
@@ -556,11 +560,52 @@ class HealthAssistantPanel extends HTMLElement {
     if (this._s.active) this.shadowRoot.querySelectorAll("[data-elapsed]").forEach((el) => (el.textContent = fmtDur(this._elapsed())));
     const rest = this._s.active?.rest;
     if (rest) {
-      if (rest.ends_at <= now()) { this._setRest(null, true); this._buzz(); }
-      else this._renderRest();
+      const left = rest.ends_at - now();
+      if (left <= 0) {
+        // Only chime if we noticed on time (not when coming back to a tab that slept through it).
+        const fresh = left > -10;
+        const next = rest.next;
+        this._setRest(null, true);
+        if (fresh) this._restDone(next);
+      } else {
+        this._renderRest();
+        this.shadowRoot.querySelectorAll("[data-restnav]").forEach((el) => (el.textContent = fmtDur(left)));
+      }
     }
   }
-  _buzz() { try { navigator.vibrate?.([200, 100, 200]); } catch (_) { /* iOS has no vibrate */ } this._toast("Rest over — next set!"); }
+  _restDone(next) {
+    this._playChime();
+    try { navigator.vibrate?.([200, 100, 200]); } catch (_) { /* iOS has no vibrate */ }
+    this._toast(next ? `Rest over — ${next}` : "Rest over — next set!");
+  }
+
+  /* --- chime: iOS only lets a page play sound after a tap, so the audio is unlocked on the
+     first tap in the panel and the chime is decoded ahead of time. */
+  _unlockAudio() {
+    if (this._audioCtx || !this._s.overview?.chime_url) return;
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    if (!Ctx) return;
+    try {
+      this._audioCtx = new Ctx();
+      this._audioCtx.resume();
+      // A silent blip inside the tap is what actually unlocks iOS audio.
+      const src = this._audioCtx.createBufferSource();
+      src.buffer = this._audioCtx.createBuffer(1, 1, 22050);
+      src.connect(this._audioCtx.destination); src.start(0);
+      fetch(this._s.overview.chime_url).then((r) => r.arrayBuffer())
+        .then((b) => new Promise((ok, bad) => this._audioCtx.decodeAudioData(b, ok, bad)))
+        .then((buf) => (this._chime = buf)).catch((e) => console.warn("Chime failed to load", e));
+    } catch (e) { console.warn(e); }
+  }
+  _playChime() {
+    const ctx = this._audioCtx;
+    if (!ctx || !this._chime) return;
+    try {
+      if (ctx.state !== "running") ctx.resume();
+      const src = ctx.createBufferSource();
+      src.buffer = this._chime; src.connect(ctx.destination); src.start(0);
+    } catch (e) { console.warn(e); }
+  }
 
   _renderRest() {
     const el = this.shadowRoot.getElementById("rest");
@@ -576,7 +621,7 @@ class HealthAssistantPanel extends HTMLElement {
       return;
     }
     el.innerHTML = `<div class="restbar"><div class="restfill" style="width:${pct}%"></div>
-      <span class="restlabel">${icon("mdi:timer-sand")} Rest <b data-restleft>${fmtDur(left)}</b></span>
+      <span class="restlabel">${icon("mdi:timer-sand")} Rest <b data-restleft>${fmtDur(left)}</b>${r.next ? `<span class="restnext">Next: ${esc(r.next)}</span>` : ""}</span>
       <div class="row"><button class="btn sm" data-action="restAdj" data-d="-15">−15</button><button class="btn sm" data-action="restAdj" data-d="15">+15</button><button class="btn sm primary" data-action="restSkip">Skip</button></div></div>`;
   }
 
@@ -587,8 +632,9 @@ class HealthAssistantPanel extends HTMLElement {
     a.rest = rest;
     this.shadowRoot.getElementById("rest").innerHTML = "";
     this._renderRest();
+    this._renderNav();
     try {
-      await this.ws("rest/set", rest ? { ends_at: rest.ends_at, total: rest.total, exercise_id: rest.exercise_id } : { ends_at: null });
+      await this.ws("rest/set", rest ? { ends_at: rest.ends_at, total: rest.total, exercise_id: rest.exercise_id, next: rest.next || null } : { ends_at: null });
     } catch (e) { if (!quiet) this._toast(e.message, true); }
   }
 
@@ -1110,18 +1156,36 @@ class HealthAssistantPanel extends HTMLElement {
     const isLast = group[group.length - 1] === ex;
     const restS = ex.rest_s ?? 120;
     if (x.type !== "warmup" && isLast && restS > 0) {
-      this._setRest({ ends_at: now() + restS, total: restS, exercise_id: this._nextUp(ei) });
+      const nx = this._nextSet(ei);
+      this._setRest({ ends_at: now() + restS, total: restS, exercise_id: nx?.exercise_id ?? ex.exercise_id, next: nx?.label ?? null });
     } else if (!isLast) {
       this._toast(`Next: ${this._exName(group[group.indexOf(ex) + 1].exercise_id)}`);
     }
     this._render();
   }
 
-  _nextUp(ei) {
-    // Exercise of the next unchecked set (shown in the Live Activity).
-    const list = this._s.active.exercises;
-    for (let i = ei; i < list.length; i++) if (list[i].sets.some((x) => !x.completed)) return list[i].exercise_id;
-    return list[ei]?.exercise_id;
+  /** The next unchecked set, e.g. "Bench Press · Set 3 · 185 lb × 8" (shown on the rest bar and iPhone). */
+  _nextSet(ei) {
+    const s = this._s, list = s.active.exercises, cur = list[ei];
+    // In a superset the next set is back at the group's first exercise.
+    let start = ei;
+    if (cur.superset) start = list.findIndex((o) => o.superset === cur.superset);
+    const order = [...list.slice(start), ...list.slice(0, start)];
+    for (const ex of order) {
+      const si = ex.sets.findIndex((x) => !x.completed);
+      if (si === -1) continue;
+      const x = ex.sets[si];
+      const prev = prevFor(s.last[ex.exercise_id], ex.sets, si);
+      const merged = { ...x };
+      for (const k of ["weight", "reps", "duration_s", "distance_m"]) if (merged[k] == null && prev?.[k] != null) merged[k] = prev[k];
+      const n = ex.sets.slice(0, si + 1).filter((y) => y.type === "working").length;
+      const setName = x.type === "working" ? `Set ${n}` : SET_TYPES[x.type].label;
+      const kind = this._exMap[ex.exercise_id]?.kind;
+      const hasNums = kind === "duration" ? merged.duration_s != null : kind === "distance" ? merged.distance_m != null : merged.reps != null || merged.weight != null;
+      const nums = hasNums ? ` · ${this._setText(ex.exercise_id, merged).replace(/^– lb × |^– kg × /, "")}` : "";
+      return { exercise_id: ex.exercise_id, label: `${this._exName(ex.exercise_id)} · ${setName}${nums}` };
+    }
+    return null;
   }
 
   /* ============================================================== events */
@@ -1215,7 +1279,7 @@ class HealthAssistantPanel extends HTMLElement {
           const ex = s.active.exercises[+d.e];
           const prev = prevFor(s.last[ex.exercise_id], ex.sets, +d.s);
           if (!prev) break;
-          Object.assign(ex.sets[+d.s], { weight: prev.weight, reps: prev.reps, duration_s: prev.duration_s, distance_m: prev.distance_m, autofill: false });
+          Object.assign(ex.sets[+d.s], { weight: prev.weight, reps: prev.reps, duration_s: prev.duration_s, distance_m: prev.distance_m, autofill: false, autofill_w: false });
           this._queueWorkoutSave(); this._render(); break;
         }
         case "toggleSet": {
@@ -1424,18 +1488,18 @@ class HealthAssistantPanel extends HTMLElement {
       const x = ex.sets[+d.s];
       const v = t.value;
       const u = this._units;
-      if (d.set === "weight") x.weight = u.wIn(v);
-      else if (d.set === "reps") {
-        x.reps = v === "" ? null : parseInt(v, 10);
-        x.autofill = false;
-        // Fill reps down into later sets that are still blank (or were filled this way).
+      // Weight and reps fill down into later sets that are still blank (or were filled this way).
+      const fillDown = (field, flag, display) => {
+        x[flag] = false;
         ex.sets.forEach((y, j) => {
-          if (j <= +d.s || y.completed || y.type === "warmup" || !(y.reps == null || y.autofill)) return;
-          y.reps = x.reps; y.autofill = x.reps != null;
-          const inp = this.shadowRoot.querySelector(`input[data-set="reps"][data-e="${d.e}"][data-s="${j}"]`);
-          if (inp) inp.value = x.reps ?? "";
+          if (j <= +d.s || y.completed || y.type === "warmup" || !(y[field] == null || y[flag])) return;
+          y[field] = x[field]; y[flag] = x[field] != null;
+          const inp = this.shadowRoot.querySelector(`input[data-set="${field}"][data-e="${d.e}"][data-s="${j}"]`);
+          if (inp) inp.value = display;
         });
-      }
+      };
+      if (d.set === "weight") { x.weight = u.wIn(v); fillDown("weight", "autofill_w", v); }
+      else if (d.set === "reps") { x.reps = v === "" ? null : parseInt(v, 10); fillDown("reps", "autofill", x.reps ?? ""); }
       else if (d.set === "duration_s") x.duration_s = v === "" ? null : parseInt(v, 10);
       else if (d.set === "minutes") x.duration_s = v === "" ? null : Math.round(Number(v) * 60);
       else if (d.set === "distance") x.distance_m = u.dIn(v);
@@ -1641,7 +1705,8 @@ main { flex:1 1 auto; min-height:0; overflow-y:auto; -webkit-overflow-scrolling:
 .wnotes { margin-top:12px; min-height:70px; }
 .restbar { position:relative; overflow:hidden; display:flex; align-items:center; justify-content:space-between; gap:8px; padding:8px 12px; background:var(--hp-card); border-top:.5px solid var(--hp-line); font-variant-numeric:tabular-nums; }
 .restfill { position:absolute; inset:0 auto 0 0; background:color-mix(in srgb, var(--hp-accent) 16%, transparent); transition:width 1s linear; }
-.restbar > * { position:relative; } .restlabel { white-space:nowrap; } .restlabel b { font-size:1.1rem; }
+.restbar > * { position:relative; } .restlabel { white-space:nowrap; min-width:0; overflow:hidden; }
+.restnext { display:block; font-size:.75rem; color:var(--hp-muted); overflow:hidden; text-overflow:ellipsis; } .restlabel b { font-size:1.1rem; }
 
 /* ---------- nutrition ---------- */
 .wide .widewrap .cols { display:grid; grid-template-columns:minmax(0,1.35fr) minmax(300px,1fr); gap:20px; align-items:start; }

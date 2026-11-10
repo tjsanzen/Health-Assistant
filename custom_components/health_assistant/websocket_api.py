@@ -106,6 +106,7 @@ def _overview(hass, model: HealthModel, msg):
         "active_workout": model.data["active_workout"],
         "workouts_7d": model.workouts_since(7),
         "food_db": hass.data[DOMAIN]["food_db"].available,
+        "chime_url": hass.data[DOMAIN].get("chime_url"),
     }
 
 
@@ -236,9 +237,10 @@ def _workout_update(hass, model, msg):
     vol.Required("ends_at"): vol.Any(None, vol.Coerce(float)),
     vol.Optional("total"): vol.Any(None, int),
     vol.Optional("exercise_id"): vol.Any(None, str),
+    vol.Optional("next"): vol.Any(None, str),
 })
 def _rest_set(hass, model, msg):
-    return model.set_rest(msg["ends_at"], msg.get("total"), msg.get("exercise_id"))
+    return model.set_rest(msg["ends_at"], msg.get("total"), msg.get("exercise_id"), msg.get("next"))
 
 
 @command("notify/targets")

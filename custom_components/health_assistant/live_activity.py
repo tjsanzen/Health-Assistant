@@ -35,6 +35,7 @@ class LiveActivity:
         self._exercise_name = exercise_name
         self._rest_timer: CALLBACK_TYPE | None = None
         self._workout: dict | None = None
+        self._next: str | None = None
 
     @property
     def service(self) -> str | None:
@@ -56,6 +57,7 @@ class LiveActivity:
             self._cancel_timer()
             rest = payload["rest"]
             if rest:
+                self._next = rest.get("next")
                 self._send_rest(rest)
                 delay = max(0.0, rest["ends_at"] - time.time())
                 self._rest_timer = async_call_later(self.hass, delay, self._rest_over)
@@ -76,7 +78,8 @@ class LiveActivity:
         self._rest_timer = None
         if self._workout:
             # Not silent: this update is what buzzes your phone when rest is done.
-            self._send_workout(silent=False, message="Rest over — time for your next set")
+            msg = f"Rest over · Next: {self._next}" if self._next else "Rest over — time for your next set"
+            self._send_workout(silent=False, message=msg)
 
     # ------------------------------------------------------------- payloads
     def _send_workout(self, silent: bool, message: str | None = None) -> None:
@@ -96,10 +99,10 @@ class LiveActivity:
 
     def _send_rest(self, rest: dict) -> None:
         w = self._workout or {}
-        name = self._exercise_name(rest.get("exercise_id")) if rest.get("exercise_id") else None
+        nxt = rest.get("next") or (self._exercise_name(rest["exercise_id"]) if rest.get("exercise_id") else None)
         self._call({
-            "title": w.get("name") or "Workout",
-            "message": f"Rest · next: {name}" if name else "Resting",
+            "title": f"Rest · {w.get('name') or 'Workout'}",
+            "message": f"Next: {nxt}" if nxt else "Resting",
             "data": {
                 "tag": TAG, "live_update": True, "chronometer": True, "when": int(rest["ends_at"]),
                 "notification_icon": "mdi:timer-sand", "url": f"/{PANEL_URL_PATH}",

@@ -428,13 +428,14 @@ class HealthModel:
         return int(self.profile.get("rest_default_s") or DEFAULT_REST_S)
 
     def set_rest(self, ends_at: float | None, total: int | None = None,
-                 exercise_id: str | None = None) -> dict | None:
+                 exercise_id: str | None = None, next_label: str | None = None) -> dict | None:
         """Start, adjust (call again) or clear (ends_at=None) the rest timer."""
         active = self.data["active_workout"]
         if not active:
             raise ValidationError("No workout in progress")
         active["rest"] = None if ends_at is None else {
             "ends_at": float(ends_at), "total": int(total or 0), "exercise_id": exercise_id,
+            "next": next_label,
         }
         self._changed()
         self._emit("rest", {"workout": active, "rest": active["rest"]})

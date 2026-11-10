@@ -22,7 +22,7 @@ from .const import (
     STATIC_URL, STORAGE_KEY, STORAGE_VERSION,
 )
 from .food_db import FoodDatabase
-from .library import DEMOS_DIR, ExerciseLibrary
+from .library import DATA_DIR, DEMOS_DIR, ExerciseLibrary
 from .live_activity import LiveActivity
 from .model import HealthModel, empty_data
 from .websocket_api import async_register_websocket_commands
@@ -67,12 +67,16 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
 async def _async_register_panel(hass: HomeAssistant) -> None:
     domain = hass.data[DOMAIN]
     if not domain.get("static_registered"):
-        await hass.http.async_register_static_paths(
-            [
-                StaticPathConfig(f"{STATIC_URL}/demos", DEMOS_DIR, cache_headers=True),
-                StaticPathConfig(STATIC_URL, FRONTEND_DIR, cache_headers=False),
-            ]
-        )
+        paths = [
+            StaticPathConfig(f"{STATIC_URL}/demos", DEMOS_DIR, cache_headers=True),
+            StaticPathConfig(STATIC_URL, FRONTEND_DIR, cache_headers=False),
+        ]
+        # Rest-over sound: data/chime.mp3
+        chime = os.path.join(DATA_DIR, "chime.mp3")
+        if await hass.async_add_executor_job(os.path.isfile, chime):
+            paths.insert(0, StaticPathConfig(f"{STATIC_URL}/sounds/chime.mp3", chime, cache_headers=True))
+            domain["chime_url"] = f"{STATIC_URL}/sounds/chime.mp3"
+        await hass.http.async_register_static_paths(paths)
         domain["static_registered"] = True
     if domain.get("panel_registered"):
         return

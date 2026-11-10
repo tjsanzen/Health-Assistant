@@ -133,7 +133,7 @@ async def test_live_activity_rest_timer(hass: HomeAssistant, hass_ws_client) -> 
     await ws.send_json({"id": 4, "type": f"{DOMAIN}/rest/set", "ends_at": ends, "total": 90, "exercise_id": "squat"})
     assert (await ws.receive_json())["success"]
     await hass.async_block_till_done()
-    assert calls[-1]["data"]["when"] == int(ends) and calls[-1]["message"] == "Rest · next: Squat"
+    assert calls[-1]["data"]["when"] == int(ends) and calls[-1]["message"] == "Next: Squat"
 
     # When the rest runs out, HA flips the activity back to the workout clock (with an alert).
     async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=95))
