@@ -30,7 +30,11 @@
         "data": {
           "daily_steps": "Average steps per day",
           "lifting_days": "Days per week with ~1 hour of weight training",
-          "goal_rate": "How fast to move toward your target weight"
+          "goal_rate": "How fast to move toward your target weight",
+          "live_activity_notify": "Show the rest timer on this phone"
+        },
+        "data_description": {
+          "live_activity_notify": "Puts your rest countdown and next set on the Lock Screen and Dynamic Island (Home Assistant Companion app, iOS 17.2+). You can change this later in Profile → Workout & rest timer."
         }
       },
       "summary": {
@@ -46,7 +50,17 @@
     }
   },
   "selector": {
-    "units": { "options": { "imperial": "Imperial (lb, ft/in)", "metric": "Metric (kg, cm)" } },
-    "sex": { "options": { "male": "Male", "female": "Female" } }
+    "units": {
+      "options": {
+        "imperial": "Imperial (lb, ft/in)",
+        "metric": "Metric (kg, cm)"
+      }
+    },
+    "sex": {
+      "options": {
+        "male": "Male",
+        "female": "Female"
+      }
+    }
   }
 }

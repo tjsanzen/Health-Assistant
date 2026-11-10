@@ -276,8 +276,13 @@ class HealthAssistantPanel extends HTMLElement {
       root.addEventListener("change", (e) => this._onChange(e));
       root.addEventListener("keydown", (e) => { if (e.key === "Enter" && e.target.dataset.enter) { e.preventDefault(); this._act(e.target.dataset.enter, e.target, e); } });
       root.addEventListener("focusin", (e) => {
-        if (!this._narrow || !e.target.matches("input,textarea")) return;
-        setTimeout(() => { this._syncViewport(); e.target.scrollIntoView({ block: "center", behavior: "smooth" }); }, 350);
+        // Grab the field now: the browser clears e.target once the event has finished.
+        const field = e.target;
+        if (!this._narrow || !field?.matches?.("input,textarea")) return;
+        setTimeout(() => {
+          this._syncViewport();
+          if (field.isConnected) field.scrollIntoView({ block: "center", behavior: "smooth" });
+        }, 350);
       });
       root.addEventListener("focusout", () => setTimeout(() => this._syncViewport(), 100));
       root.addEventListener("pointerdown", () => this._unlockAudio());
@@ -613,16 +618,18 @@ class HealthAssistantPanel extends HTMLElement {
     const r = this._s.active?.rest;
     if (!r) { el.innerHTML = ""; return; }
     const left = Math.max(0, r.ends_at - now());
-    const pct = Math.min(100, (left / (r.total || 1)) * 100);
     const bar = el.querySelector(".restbar");
-    if (bar) { // update in place so buttons don't flicker
-      bar.querySelector(".restfill").style.width = `${pct}%`;
+    if (bar) { // update only the digits so nothing moves
       bar.querySelector("[data-restleft]").textContent = fmtDur(left);
       return;
     }
-    el.innerHTML = `<div class="restbar"><div class="restfill" style="width:${pct}%"></div>
-      <span class="restlabel">${icon("mdi:timer-sand")} Rest <b data-restleft>${fmtDur(left)}</b>${r.next ? `<span class="restnext">Next: ${esc(r.next)}</span>` : ""}</span>
-      <div class="row"><button class="btn sm" data-action="restAdj" data-d="-15">−15</button><button class="btn sm" data-action="restAdj" data-d="15">+15</button><button class="btn sm primary" data-action="restSkip">Skip</button></div></div>`;
+    // Static bar: countdown (and next set) on the left, −15 / +15 / Skip on the right.
+    el.innerHTML = `<div class="restbar">
+      <div class="restleft">
+        <div class="resttime">${icon("mdi:timer-sand")}<b data-restleft>${fmtDur(left)}</b></div>
+        ${r.next ? `<div class="restnext">Next: ${esc(r.next)}</div>` : ""}
+      </div>
+      <div class="restbtns"><button class="btn sm" data-action="restAdj" data-d="-15">−15</button><button class="btn sm" data-action="restAdj" data-d="15">+15</button><button class="btn sm primary" data-action="restSkip">Skip</button></div></div>`;
   }
 
   /** Start/adjust/clear the rest timer locally and tell HA (which drives the iPhone Live Activity). */
@@ -1712,10 +1719,12 @@ main { flex:1 1 auto; min-height:0; overflow-y:auto; -webkit-overflow-scrolling:
 .check.on { background:var(--hp-good); color:#fff; }
 .check .rpe { position:absolute; top:-6px; right:-6px; background:var(--hp-card); color:var(--hp-text); border:1px solid var(--hp-line); border-radius:8px; font-size:.65rem; font-weight:700; padding:0 4px; line-height:14px; }
 .wnotes { margin-top:12px; min-height:70px; }
-.restbar { position:relative; overflow:hidden; display:flex; align-items:center; justify-content:space-between; gap:8px; padding:8px 12px; background:var(--hp-card); border-top:.5px solid var(--hp-line); font-variant-numeric:tabular-nums; }
-.restfill { position:absolute; inset:0 auto 0 0; background:color-mix(in srgb, var(--hp-accent) 16%, transparent); transition:width 1s linear; }
-.restbar > * { position:relative; } .restlabel { white-space:nowrap; min-width:0; overflow:hidden; }
-.restnext { display:block; font-size:.75rem; color:var(--hp-muted); overflow:hidden; text-overflow:ellipsis; } .restlabel b { font-size:1.1rem; }
+.restbar { display:flex; align-items:center; gap:10px; padding:8px 12px; background:var(--hp-card); border-top:.5px solid var(--hp-line); }
+.restleft { flex:1 1 auto; min-width:0; text-align:left; }
+.resttime { display:flex; align-items:center; gap:6px; color:var(--hp-accent); }
+.resttime b { font-size:1.25rem; font-weight:700; font-variant-numeric:tabular-nums; min-width:3.2em; }
+.restnext { font-size:.75rem; color:var(--hp-muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.restbtns { flex:0 0 auto; display:flex; gap:6px; margin-left:auto; }
 
 /* ---------- nutrition ---------- */
 .wide .widewrap .cols { display:grid; grid-template-columns:minmax(0,1.35fr) minmax(300px,1fr); gap:20px; align-items:start; }
@@ -1807,4 +1816,6 @@ label.inline { flex-direction:row; align-items:center; gap:8px; } label.inline s
 @media (max-width: 370px) { .sethead, .setrow { grid-template-columns: 30px minmax(0,1fr) 60px 50px 40px; gap:6px; } .ringwrap { width:104px; height:104px; } }
 `;
 
-customElements.define("health-assistant-panel", HealthAssistantPanel);
+// Home Assistant can load a fresh copy of this file (new ?v= after an update) while the old
+// one is still registered; the first definition wins until the page reloads.
+if (!customElements.get("health-assistant-panel")) customElements.define("health-assistant-panel", HealthAssistantPanel);

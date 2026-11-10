@@ -29,6 +29,7 @@ CONF_BODY_FAT = "body_fat_pct"
 CONF_STEPS = "daily_steps"
 CONF_LIFT_DAYS = "lifting_days"
 CONF_GOAL_RATE = "goal_rate_kg_week"
+CONF_LIVE_ACTIVITY = "live_activity_notify"
 
 # Form-only fields (converted to the metric keys above before storing)
 CONF_WEIGHT = "weight"

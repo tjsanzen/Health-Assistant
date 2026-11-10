@@ -40,6 +40,7 @@ Everything the integration reads lives in `custom_components/health_assistant/da
 data/
 ├── opennutrition_foods.tsv     # source export, git-ignored (too big for GitHub)
 ├── foods.db                    # built from the TSV by scripts/build_food_db.py
+├── chime.mp3                   # plays when a rest timer finishes
 ├── exercises/
 │   └── exercises.json          # the exercise library
 └── demos/
@@ -69,7 +70,14 @@ data/
 
 ## Rest timer on iPhone (Dynamic Island)
 
-Profile → Settings → **Workout & rest timer** → choose your phone. Health Assistant then uses the Companion app's Live Activities: one activity starts with the workout and shows the workout clock, switches to a countdown while you rest, buzzes when the rest is over, and ends when you finish or discard. The countdown ticks on the phone itself, so it keeps going even with the panel closed.
+Pick your phone during setup (it's pre-selected when the profile is linked to your Home Assistant user), or later under Profile → Settings → **Workout & rest timer**, which also has a **Send a test** button. Health Assistant then uses the Companion app's Live Activities. One activity runs for the whole workout:
+
+- **While you rest:** a countdown, with "Next: Bench Press · Set 3 · 185 lb × 8" underneath.
+- **When the rest ends:** an alert reading "Rest over · Next: …".
+- **Between sets:** "Workout in progress".
+- **When you finish or discard:** the activity ends.
+
+The countdown ticks on the phone itself, so it keeps going with the panel closed. The Companion app only allows Material Design icons, so the activity uses `mdi:food-apple` in the logo's blue. The title is fixed when the activity starts, so it's always the workout name.
 
 Requires Companion app 2026.9+, iOS 17.2+ and Home Assistant 2026.7+. Live Activities must also be allowed for Home Assistant in iPhone Settings, and the phone needs to reach HA (remote access when you're at the gym). Apple ends Live Activities after 8 hours and limits how many can be started in a row.
 

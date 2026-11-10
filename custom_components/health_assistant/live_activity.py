@@ -20,6 +20,10 @@ from .const import PANEL_URL_PATH
 
 _LOGGER = logging.getLogger(__name__)
 TAG = "health_assistant_workout"
+# The Companion app draws Live Activity icons from Material Design Icons only (no custom
+# images), so this is the closest match to brand/icon.png, in the same blue.
+ICON = "mdi:food-apple"
+ICON_COLOR = "#40C8F4"
 
 
 def notify_targets(hass: HomeAssistant) -> list[str]:
@@ -98,7 +102,7 @@ class LiveActivity:
             "data": {
                 "tag": TAG, "live_update": True,
                 "critical_text": "Lifting",
-                "notification_icon": "mdi:dumbbell", "notification_icon_color": "#03A9F4",
+                "notification_icon": ICON, "notification_icon_color": ICON_COLOR,
                 "url": f"/{PANEL_URL_PATH}", "silent": silent,
             },
         })
@@ -110,14 +114,12 @@ class LiveActivity:
         seconds_left = max(1, int(round(rest["ends_at"] - time.time())))
         self._call({
             "title": w.get("name") or "Workout",
-            "message": f"Rest · Next: {nxt}" if nxt else "Resting",
+            "message": f"Next: {nxt}" if nxt else "Resting",
             "data": {
                 "tag": TAG, "live_update": True,
                 "chronometer": True, "when": seconds_left, "when_relative": True,
-                "progress": 0, "progress_max": max(1, int(rest.get("total") or seconds_left)),
-                "progress_bar_direction": "increasing",
                 "critical_text": "Rest",
-                "notification_icon": "mdi:timer-sand", "notification_icon_color": "#FF9500",
+                "notification_icon": ICON, "notification_icon_color": ICON_COLOR,
                 "url": f"/{PANEL_URL_PATH}", "silent": True,
             },
         })
@@ -130,7 +132,7 @@ class LiveActivity:
             "data": {
                 "tag": "health_assistant_test", "live_update": True,
                 "chronometer": True, "when": 60, "when_relative": True,
-                "critical_text": "Test", "notification_icon": "mdi:timer-sand",
+                "critical_text": "Test", "notification_icon": ICON, "notification_icon_color": ICON_COLOR,
             },
         }, blocking=True)
 

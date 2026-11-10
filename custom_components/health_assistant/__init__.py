@@ -17,7 +17,7 @@ from homeassistant.util import dt as dt_util
 
 from .const import (
     CONF_AGE, CONF_BODY_FAT, CONF_GOAL_RATE, CONF_HEIGHT_CM, CONF_LIFT_DAYS, CONF_NAME,
-    CONF_SEX, CONF_STEPS, CONF_TARGET_WEIGHT_KG, CONF_UNITS, CONF_USER_ID, CONF_WEIGHT_KG,
+    CONF_LIVE_ACTIVITY, CONF_SEX, CONF_STEPS, CONF_TARGET_WEIGHT_KG, CONF_UNITS, CONF_USER_ID, CONF_WEIGHT_KG,
     DOMAIN, PANEL_COMPONENT, PANEL_ICON, PANEL_TITLE, PANEL_URL_PATH, SIGNAL_DATA_UPDATED,
     STATIC_URL, STORAGE_KEY, STORAGE_VERSION,
 )
@@ -49,7 +49,7 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
         os.path.join(os.path.dirname(__file__), "data", "foods.db"),
     ])
     domain["food_db"] = db
-    domain["library"] = ExerciseLibrary(demo_url=f"{STATIC_URL}/demos")
+    domain["library"] = ExerciseLibrary(demo_url="/health_assistant_demos")
     count = len(await hass.async_add_executor_job(domain["library"].all))
     _LOGGER.info("Health Assistant exercise library: %s exercises", count)
     if db.available:
@@ -68,14 +68,14 @@ async def _async_register_panel(hass: HomeAssistant) -> None:
     domain = hass.data[DOMAIN]
     if not domain.get("static_registered"):
         paths = [
-            StaticPathConfig(f"{STATIC_URL}/demos", DEMOS_DIR, cache_headers=True),
+            StaticPathConfig("/health_assistant_demos", DEMOS_DIR, cache_headers=True),
             StaticPathConfig(STATIC_URL, FRONTEND_DIR, cache_headers=False),
         ]
         # Rest-over sound: data/chime.mp3
         chime = os.path.join(DATA_DIR, "chime.mp3")
         if await hass.async_add_executor_job(os.path.isfile, chime):
-            paths.insert(0, StaticPathConfig(f"{STATIC_URL}/sounds/chime.mp3", chime, cache_headers=True))
-            domain["chime_url"] = f"{STATIC_URL}/sounds/chime.mp3"
+            paths.append(StaticPathConfig("/health_assistant_sounds/chime.mp3", chime, cache_headers=True))
+            domain["chime_url"] = "/health_assistant_sounds/chime.mp3"
         await hass.http.async_register_static_paths(paths)
         domain["static_registered"] = True
     if domain.get("panel_registered"):
@@ -110,6 +110,7 @@ def _initial_data(entry: ConfigEntry, now_iso: str, today: str) -> dict:
         "daily_steps": d[CONF_STEPS],
         "lifting_days": d[CONF_LIFT_DAYS],
         "goal_rate_kg_week": d[CONF_GOAL_RATE],
+        "live_activity_notify": d.get(CONF_LIVE_ACTIVITY),
     }
     data = empty_data(profile)
     # Seed the health-stat history with the setup answers.
