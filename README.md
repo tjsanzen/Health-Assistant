@@ -3,6 +3,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Home Assistant](https://img.shields.io/badge/Home%20Assistant-2025.2+-41BDF5.svg)](https://www.home-assistant.io/)
 [![English](https://img.shields.io/badge/lang-English-blue.svg)](#localization)
+[AI Assisted: Claude](https://img.shields.io/badge/Claude-AI_Assisted-orange?logo=claude)
 
 Workout, Nutrition, and Health Datapoint logging inside of Home Assistant. Track workouts, personal records, count calories, and meet your goals without compromising your data. 
 
