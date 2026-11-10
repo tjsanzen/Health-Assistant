@@ -10,7 +10,7 @@ Workout, Nutrition, and Health Datapoint logging inside of Home Assistant. Track
 > **IMPORTANT NOTICE**
 > 
 > ⚠️ **This integration is _<ins>NOT</ins>_ able to run offline.**
-> Health Assistant requires a connection to your Home Assistant server to run. While most gyms have free wifi for members, please keep this > in mind when using. This integration has been developed for web and the iOS companion app.
+> Health Assistant requires a connection to your Home Assistant server to run. While most gyms have free wifi for members, please keep this in mind when using. This integration has been developed for web and the iOS companion app.
 
 ## Installation
 
