@@ -243,6 +243,15 @@ def _rest_set(hass, model, msg):
     return model.set_rest(msg["ends_at"], msg.get("total"), msg.get("exercise_id"), msg.get("next"))
 
 
+@command("live/test", {vol.Required("service"): str})
+async def _live_test(hass, model, msg):
+    from .live_activity import LiveActivity
+    if not hass.services.has_service("notify", msg["service"]):
+        raise ValidationError(f"notify.{msg['service']} doesn't exist")
+    await LiveActivity(hass, lambda: model.profile, lambda x: x).async_test(msg["service"])
+    return {"sent_to": f"notify.{msg['service']}"}
+
+
 @command("notify/targets")
 def _notify_targets(hass, model, msg):
     return notify_targets(hass)

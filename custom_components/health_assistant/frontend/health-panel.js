@@ -888,7 +888,8 @@ class HealthAssistantPanel extends HTMLElement {
         <label>Show rest timer on iPhone (Dynamic Island & Lock Screen)
           <select data-ws="live_activity_notify"><option value="">Off</option>${(targets || []).map((t) => `<option value="${esc(t)}" ${t === p.live_activity_notify ? "selected" : ""}>${esc(t.replace(/^mobile_app_/, "").replace(/_/g, " "))}</option>`).join("")}</select></label>
         ${targets && !targets.length ? `<p class="muted small">No Companion app devices found. Install the Home Assistant app on your phone and sign in first.</p>` : ""}
-        <p class="muted small">Uses Live Activities from the Home Assistant Companion app (app 2026.9+, iOS 17.2+, Home Assistant 2026.7+). The workout clock shows while you train and switches to a countdown when you rest. Allow Live Activities for Home Assistant in iPhone Settings.</p>
+        <button class="btn soft full" data-action="testLive">${icon("mdi:cellphone-arrow-down")} Send a test (60-second countdown)</button>
+        <p class="muted small">Uses Live Activities from the Home Assistant Companion app (iOS 17.2+, Home Assistant 2026.7+). While you rest, your Lock Screen and Dynamic Island count down and show your next set. If the test doesn't appear: allow Live Activities for Home Assistant in iPhone Settings → Home Assistant, accept the one-time Lock Screen notice, and make sure the phone can reach Home Assistant. iOS also limits how many activities can be started in a row, so repeated tests may stop appearing for a while.</p>
         <button class="btn primary full" data-action="saveWorkoutSettings">Save</button>
       </div>`;
   }
@@ -1440,6 +1441,12 @@ class HealthAssistantPanel extends HTMLElement {
           if (this._sheet === sh) this._renderSheet();
           break;
         }
+        case "testLive": {
+          const svc = this.shadowRoot.querySelector('[data-ws="live_activity_notify"]').value;
+          if (!svc) { this._toast("Pick your phone first", true); break; }
+          const r = await this.ws("live/test", { service: svc });
+          this._toast(`Test sent to ${r.sent_to} — check your Lock Screen`); break;
+        }
         case "saveWorkoutSettings": {
           const get = (k) => this.shadowRoot.querySelector(`[data-ws="${k}"]`).value;
           await this.ws("profile/update", { changes: { rest_default_s: Number(get("rest_default_s")), live_activity_notify: get("live_activity_notify") || null } });
@@ -1600,7 +1607,9 @@ h2 { margin:0 0 4px; font-size:1.25rem; font-weight:650; } h3 { margin:14px 0 8p
 main { flex:1 1 auto; min-height:0; overflow-y:auto; -webkit-overflow-scrolling:touch; overscroll-behavior-y:contain; }
 .wrap { max-width:720px; margin:0 auto; padding:16px 16px 28px; }
 .wrap.widewrap { max-width:1180px; }
-.narrow .wrap { padding:calc(10px + env(safe-area-inset-top)) 12px 20px; }
+.narrow .wrap { padding:calc(10px + env(safe-area-inset-top)) 12px 20px; min-height:calc(100% + 1px); }
+/* ^ Keeps the content area scrollable even when a page is nearly empty. Otherwise iOS
+   hands the swipe to the page behind the panel, which bounces the whole app. */
 .top { display:flex; align-items:center; gap:8px; padding:0 16px; height:56px; flex:0 0 auto; background:var(--app-header-background-color, var(--hp-card)); color:var(--app-header-text-color, var(--hp-text)); border-bottom:1px solid var(--hp-line); }
 .narrow .top { display:none; }
 .title { display:flex; align-items:center; gap:8px; font-size:1.2rem; font-weight:500; }

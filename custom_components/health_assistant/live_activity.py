@@ -82,39 +82,75 @@ class LiveActivity:
             self._send_workout(silent=False, message=msg)
 
     # ------------------------------------------------------------- payloads
+    # Shapes follow https://companion.home-assistant.io/docs/notifications/live-activities/
+    # title/message at the top of `data`, everything else in the nested `data` block.
+    # `title` is fixed when the activity starts, so it stays the workout name.
+
     def _send_workout(self, silent: bool, message: str | None = None) -> None:
+        """Between sets: no timer (a count-up from the past isn't a documented case)."""
         w = self._workout
         if not w:
             return
-        started = datetime.fromisoformat(w["started_at"]).timestamp()
+        started = datetime.fromisoformat(w["started_at"]).astimezone()
         self._call({
             "title": w.get("name") or "Workout",
-            "message": message or "Workout in progress",
+            "message": message or f"Workout in progress · started {started.strftime('%-I:%M %p')}",
             "data": {
-                "tag": TAG, "live_update": True, "chronometer": True, "when": int(started),
-                "notification_icon": "mdi:dumbbell", "url": f"/{PANEL_URL_PATH}",
-                "critical_text": "Workout", "silent": silent,
+                "tag": TAG, "live_update": True,
+                "critical_text": "Lifting",
+                "notification_icon": "mdi:dumbbell", "notification_icon_color": "#03A9F4",
+                "url": f"/{PANEL_URL_PATH}", "silent": silent,
             },
         })
 
     def _send_rest(self, rest: dict) -> None:
+        """While resting: countdown ticking on the phone, exactly like the docs' example."""
         w = self._workout or {}
         nxt = rest.get("next") or (self._exercise_name(rest["exercise_id"]) if rest.get("exercise_id") else None)
+        seconds_left = max(1, int(round(rest["ends_at"] - time.time())))
         self._call({
-            "title": f"Rest · {w.get('name') or 'Workout'}",
-            "message": f"Next: {nxt}" if nxt else "Resting",
+            "title": w.get("name") or "Workout",
+            "message": f"Rest · Next: {nxt}" if nxt else "Resting",
             "data": {
-                "tag": TAG, "live_update": True, "chronometer": True, "when": int(rest["ends_at"]),
-                "notification_icon": "mdi:timer-sand", "url": f"/{PANEL_URL_PATH}",
-                "critical_text": "Rest", "silent": True,
+                "tag": TAG, "live_update": True,
+                "chronometer": True, "when": seconds_left, "when_relative": True,
+                "progress": 0, "progress_max": max(1, int(rest.get("total") or seconds_left)),
+                "progress_bar_direction": "increasing",
+                "critical_text": "Rest",
+                "notification_icon": "mdi:timer-sand", "notification_icon_color": "#FF9500",
+                "url": f"/{PANEL_URL_PATH}", "silent": True,
             },
         })
+
+    async def async_test(self, service: str) -> None:
+        """Send the docs' minimal countdown so the setup can be checked on its own."""
+        await self.hass.services.async_call("notify", service, {
+            "title": "Health Assistant",
+            "message": "Test rest timer · 60 seconds",
+            "data": {
+                "tag": "health_assistant_test", "live_update": True,
+                "chronometer": True, "when": 60, "when_relative": True,
+                "critical_text": "Test", "notification_icon": "mdi:timer-sand",
+            },
+        }, blocking=True)
+
+        async def _clear(_now) -> None:
+            await self.hass.services.async_call("notify", service, {
+                "message": "clear_notification", "data": {"tag": "health_assistant_test"}}, blocking=True)
+
+        async_call_later(self.hass, 75, _clear)
 
     def _call(self, data: dict) -> None:
         svc = self.service
         if not svc:
+            _LOGGER.debug("Live Activity skipped: no phone selected (Profile → Workout & rest timer)")
             return
-        self.hass.async_create_task(
-            self.hass.services.async_call("notify", svc, data, blocking=False),
-            "health_assistant_live_activity",
-        )
+        _LOGGER.debug("Live Activity → notify.%s: %s", svc, data)
+
+        async def _send() -> None:
+            try:
+                await self.hass.services.async_call("notify", svc, data, blocking=True)
+            except Exception as err:  # noqa: BLE001 - surface any failure in the log
+                _LOGGER.warning("Live Activity notification to notify.%s failed: %s", svc, err)
+
+        self.hass.async_create_task(_send(), "health_assistant_live_activity")
