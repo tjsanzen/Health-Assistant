@@ -1,0 +1,517 @@
+"""Health Assistant data model.
+
+All user data for one profile lives in a single dict persisted by Home
+Assistant's Store helper. Everything is stored in metric units (kg, cm, g);
+the frontend converts for display.
+
+This module has no Home Assistant imports so it can be unit tested directly.
+"""
+from __future__ import annotations
+
+import copy
+import uuid
+from datetime import date, datetime, timedelta
+from typing import Any, Callable
+
+from .calculations import calculate_energy, estimated_1rm
+from .const import MEALS, SET_TYPES, VITAL_TYPES
+from .exercises import BUILTIN_EXERCISES
+
+RECENT_FOODS_MAX = 40
+COUNTED_SET_TYPES = {"working", "failure", "drop"}  # warm-ups never count toward records
+
+
+def new_id() -> str:
+    return uuid.uuid4().hex[:12]
+
+
+def empty_data(profile: dict) -> dict:
+    return {
+        "profile": profile,
+        "food_log": [],
+        "custom_foods": [],
+        "recent_foods": [],
+        "vitals": [],
+        "workouts": [],
+        "templates": [],
+        "custom_exercises": [],
+        "active_workout": None,
+    }
+
+
+class ValidationError(ValueError):
+    """Raised for bad input coming from the panel."""
+
+
+class HealthModel:
+    def __init__(
+        self,
+        data: dict,
+        save: Callable[[], None],
+        now: Callable[[], datetime],
+    ) -> None:
+        self.data = data
+        self._save = save
+        self._now = now
+        for key, default in empty_data({}).items():
+            self.data.setdefault(key, copy.deepcopy(default))
+
+    # ------------------------------------------------------------------ utils
+    def today(self) -> str:
+        return self._now().date().isoformat()
+
+    def _changed(self) -> None:
+        self._save()
+
+    # ---------------------------------------------------------------- profile
+    @property
+    def profile(self) -> dict:
+        return self.data["profile"]
+
+    def update_profile(self, changes: dict) -> dict:
+        allowed = {
+            "name", "units", "sex", "age", "height_cm", "target_weight_kg",
+            "daily_steps", "lifting_days", "goal_rate_kg_week",
+        }
+        for k, v in changes.items():
+            if k not in allowed:
+                raise ValidationError(f"Unknown profile field: {k}")
+            self.profile[k] = v
+        if "age" in changes:
+            self.profile["age_recorded"] = self.today()
+        if "height_cm" in changes:
+            self.add_vital("height", {"value": changes["height_cm"]}, note="Profile update")
+        self._changed()
+        return self.profile
+
+    def current_age(self) -> float:
+        age = self.profile.get("age") or 30
+        recorded = self.profile.get("age_recorded")
+        if recorded:
+            years = (self._now().date() - date.fromisoformat(recorded)).days / 365.25
+            age += int(years)
+        return age
+
+    def current_weight(self) -> float | None:
+        v = self.latest_vital("weight")
+        return v["value"] if v else None
+
+    def current_body_fat(self) -> float | None:
+        v = self.latest_vital("body_fat")
+        return v["value"] if v else None
+
+    def current_height(self) -> float | None:
+        v = self.latest_vital("height")
+        return v["value"] if v else self.profile.get("height_cm")
+
+    def energy(self) -> dict | None:
+        weight = self.current_weight()
+        height = self.current_height()
+        if not weight or not height:
+            return None
+        res = calculate_energy(
+            weight_kg=weight,
+            height_cm=height,
+            age=self.current_age(),
+            sex=self.profile.get("sex", "male"),
+            body_fat_pct=self.current_body_fat(),
+            daily_steps=int(self.profile.get("daily_steps") or 0),
+            lifting_days=int(self.profile.get("lifting_days") or 0),
+            target_weight_kg=self.profile.get("target_weight_kg"),
+            goal_rate_kg_week=float(self.profile.get("goal_rate_kg_week") or 0),
+        )
+        return res.as_dict()
+
+    # ------------------------------------------------------------------- food
+    def add_food(self, entry: dict) -> dict:
+        name = (entry.get("name") or "").strip()
+        if not name:
+            raise ValidationError("Food name is required")
+        meal = entry.get("meal") or "snack"
+        if meal not in MEALS:
+            raise ValidationError(f"Meal must be one of {MEALS}")
+        item = {
+            "id": new_id(),
+            "date": entry.get("date") or self.today(),
+            "meal": meal,
+            "logged_at": self._now().isoformat(),
+            "food_id": entry.get("food_id"),
+            "name": name,
+            "brand": entry.get("brand"),
+            "amount": float(entry.get("amount") or 1),
+            "unit": entry.get("unit") or "serving",
+            "grams": entry.get("grams"),
+        }
+        for k in ("kcal", "protein", "fat", "carbs", "fiber"):
+            item[k] = round(float(entry.get(k) or 0), 1)
+        self.data["food_log"].append(item)
+        if entry.get("remember", True):
+            self._remember_food(entry)
+        self._changed()
+        return item
+
+    def _remember_food(self, entry: dict) -> None:
+        """Keep a snapshot of recently used foods (per-100g basis) for quick add."""
+        if not entry.get("per_100g") and not entry.get("per_serving"):
+            return
+        key = entry.get("food_id") or entry["name"].lower()
+        recent = [r for r in self.data["recent_foods"] if r["key"] != key]
+        recent.insert(0, {
+            "key": key,
+            "food_id": entry.get("food_id"),
+            "name": entry["name"],
+            "brand": entry.get("brand"),
+            "serving_qty": entry.get("serving_qty"),
+            "serving_unit": entry.get("serving_unit"),
+            "serving_g": entry.get("serving_g"),
+            "per_100g": entry.get("per_100g"),
+            "per_serving": entry.get("per_serving"),
+            "last_amount": entry.get("amount"),
+            "last_unit": entry.get("unit"),
+        })
+        self.data["recent_foods"] = recent[:RECENT_FOODS_MAX]
+
+    def update_food(self, entry_id: str, changes: dict) -> dict:
+        for item in self.data["food_log"]:
+            if item["id"] == entry_id:
+                for k in ("meal", "amount", "unit", "grams", "kcal", "protein", "fat",
+                          "carbs", "fiber", "name", "date"):
+                    if k in changes:
+                        item[k] = changes[k]
+                self._changed()
+                return item
+        raise ValidationError("Food entry not found")
+
+    def delete_food(self, entry_id: str) -> None:
+        before = len(self.data["food_log"])
+        self.data["food_log"] = [i for i in self.data["food_log"] if i["id"] != entry_id]
+        if len(self.data["food_log"]) == before:
+            raise ValidationError("Food entry not found")
+        self._changed()
+
+    def food_day(self, day: str | None = None) -> dict:
+        day = day or self.today()
+        entries = [i for i in self.data["food_log"] if i["date"] == day]
+        totals = {k: round(sum(i.get(k) or 0 for i in entries), 1)
+                  for k in ("kcal", "protein", "fat", "carbs", "fiber")}
+        energy = self.energy()
+        target = energy["target"] if energy else None
+        return {
+            "date": day,
+            "entries": sorted(entries, key=lambda i: i["logged_at"]),
+            "totals": totals,
+            "target": target,
+            "remaining": round(target - totals["kcal"], 1) if target else None,
+            "macro_targets": {
+                "protein": energy["protein_g"], "fat": energy["fat_g"], "carbs": energy["carbs_g"],
+            } if energy else None,
+        }
+
+    def add_custom_food(self, food: dict) -> dict:
+        if not food.get("name"):
+            raise ValidationError("Food name is required")
+        item = {
+            "id": f"custom_{new_id()}",
+            "name": food["name"],
+            "brand": food.get("brand"),
+            "serving_qty": food.get("serving_qty") or 1,
+            "serving_unit": food.get("serving_unit") or "serving",
+            "serving_g": food.get("serving_g"),
+            "per_serving": {k: float(food.get(k) or 0) for k in ("kcal", "protein", "fat", "carbs", "fiber")},
+            "custom": True,
+        }
+        self.data["custom_foods"].append(item)
+        self._changed()
+        return item
+
+    def delete_custom_food(self, food_id: str) -> None:
+        self.data["custom_foods"] = [f for f in self.data["custom_foods"] if f["id"] != food_id]
+        self._changed()
+
+    def search_custom_foods(self, query: str) -> list[dict]:
+        q = query.lower().strip()
+        return [f for f in self.data["custom_foods"] if q in f["name"].lower()]
+
+    # ----------------------------------------------------------------- vitals
+    def add_vital(self, vtype: str, values: dict, recorded_at: str | None = None,
+                  note: str | None = None) -> dict:
+        spec = VITAL_TYPES.get(vtype)
+        if not spec:
+            raise ValidationError(f"Unknown stat type: {vtype}")
+        item: dict[str, Any] = {
+            "id": new_id(),
+            "type": vtype,
+            "recorded_at": recorded_at or self._now().isoformat(),
+            "unit": spec["unit"],
+            "note": note,
+        }
+        for f in spec["fields"]:
+            if values.get(f) in (None, ""):
+                raise ValidationError(f"{f} is required for {vtype}")
+            item[f] = round(float(values[f]), 2)
+        self.data["vitals"].append(item)
+        self._changed()
+        return item
+
+    def delete_vital(self, vital_id: str) -> None:
+        self.data["vitals"] = [v for v in self.data["vitals"] if v["id"] != vital_id]
+        self._changed()
+
+    def vitals(self, vtype: str | None = None, limit: int = 200) -> list[dict]:
+        items = [v for v in self.data["vitals"] if vtype is None or v["type"] == vtype]
+        items.sort(key=lambda v: v["recorded_at"], reverse=True)
+        return items[:limit]
+
+    def latest_vital(self, vtype: str) -> dict | None:
+        items = self.vitals(vtype, limit=1)
+        return items[0] if items else None
+
+    def latest_vitals(self) -> dict:
+        return {t: self.latest_vital(t) for t in VITAL_TYPES}
+
+    # -------------------------------------------------------------- exercises
+    def exercises(self) -> list[dict]:
+        return BUILTIN_EXERCISES + self.data["custom_exercises"]
+
+    def exercise(self, exercise_id: str) -> dict | None:
+        return next((e for e in self.exercises() if e["id"] == exercise_id), None)
+
+    def add_exercise(self, ex: dict) -> dict:
+        name = (ex.get("name") or "").strip()
+        if not name:
+            raise ValidationError("Exercise name is required")
+        item = {
+            "id": f"custom_{new_id()}",
+            "name": name,
+            "muscle": ex.get("muscle") or "Other",
+            "equipment": ex.get("equipment") or "Other",
+            "kind": ex.get("kind") or "weight_reps",
+            "custom": True,
+        }
+        self.data["custom_exercises"].append(item)
+        self._changed()
+        return item
+
+    # --------------------------------------------------------------- workouts
+    @staticmethod
+    def _blank_set(prev: dict | None = None, set_type: str = "working") -> dict:
+        return {
+            "id": new_id(),
+            "type": set_type,
+            "weight": prev.get("weight") if prev else None,
+            "reps": prev.get("reps") if prev else None,
+            "rpe": None,
+            "duration_s": prev.get("duration_s") if prev else None,
+            "distance_m": prev.get("distance_m") if prev else None,
+            "completed": False,
+        }
+
+    def start_workout(self, template_id: str | None = None, name: str | None = None) -> dict:
+        if self.data["active_workout"]:
+            raise ValidationError("A workout is already in progress")
+        exercises = []
+        if template_id:
+            tpl = next((t for t in self.data["templates"] if t["id"] == template_id), None)
+            if not tpl:
+                raise ValidationError("Template not found")
+            name = name or tpl["name"]
+            for tex in tpl["exercises"]:
+                exercises.append({
+                    "id": new_id(),
+                    "exercise_id": tex["exercise_id"],
+                    "notes": "",
+                    "sets": [self._blank_set(s, s.get("type", "working")) for s in tex["sets"]],
+                })
+        workout = {
+            "id": new_id(),
+            "name": name or self._default_workout_name(),
+            "template_id": template_id,
+            "started_at": self._now().isoformat(),
+            "ended_at": None,
+            "notes": "",
+            "exercises": exercises,
+        }
+        self.data["active_workout"] = workout
+        self._changed()
+        return workout
+
+    def _default_workout_name(self) -> str:
+        h = self._now().hour
+        part = "Morning" if h < 12 else "Afternoon" if h < 17 else "Evening"
+        return f"{part} Workout"
+
+    def update_active_workout(self, workout: dict) -> dict:
+        active = self.data["active_workout"]
+        if not active or active["id"] != workout.get("id"):
+            raise ValidationError("No matching workout in progress")
+        self._validate_workout(workout)
+        # Never let the client move the start time silently
+        workout["started_at"] = workout.get("started_at") or active["started_at"]
+        self.data["active_workout"] = workout
+        self._changed()
+        return workout
+
+    def _validate_workout(self, workout: dict) -> None:
+        for ex in workout.get("exercises", []):
+            if not ex.get("exercise_id"):
+                raise ValidationError("Exercise id missing")
+            for s in ex.get("sets", []):
+                if s.get("type", "working") not in SET_TYPES:
+                    raise ValidationError(f"Set type must be one of {SET_TYPES}")
+                rpe = s.get("rpe")
+                if rpe not in (None, "") and not (1 <= float(rpe) <= 10):
+                    raise ValidationError("RPE must be between 1 and 10")
+
+    def finish_workout(self) -> dict:
+        active = self.data["active_workout"]
+        if not active:
+            raise ValidationError("No workout in progress")
+        workout = copy.deepcopy(active)
+        workout["ended_at"] = self._now().isoformat()
+        # Drop incomplete sets and exercises left empty
+        for ex in workout["exercises"]:
+            ex["sets"] = [s for s in ex["sets"] if s.get("completed")]
+        workout["exercises"] = [e for e in workout["exercises"] if e["sets"]]
+        workout["prs"] = self._detect_prs(workout)
+        workout["summary"] = self.workout_summary(workout)
+        self.data["workouts"].append(workout)
+        self.data["active_workout"] = None
+        self._changed()
+        return workout
+
+    def discard_workout(self) -> None:
+        self.data["active_workout"] = None
+        self._changed()
+
+    def delete_workout(self, workout_id: str) -> None:
+        self.data["workouts"] = [w for w in self.data["workouts"] if w["id"] != workout_id]
+        self._changed()
+
+    def workout(self, workout_id: str) -> dict | None:
+        return next((w for w in self.data["workouts"] if w["id"] == workout_id), None)
+
+    def workout_list(self, offset: int = 0, limit: int = 30) -> dict:
+        items = sorted(self.data["workouts"], key=lambda w: w["started_at"], reverse=True)
+        return {"total": len(items), "items": items[offset: offset + limit]}
+
+    @staticmethod
+    def workout_summary(workout: dict) -> dict:
+        volume = 0.0
+        sets = 0
+        for ex in workout["exercises"]:
+            for s in ex["sets"]:
+                if s.get("type") in COUNTED_SET_TYPES:
+                    sets += 1
+                    volume += (s.get("weight") or 0) * (s.get("reps") or 0)
+        duration = None
+        if workout.get("ended_at"):
+            duration = int((datetime.fromisoformat(workout["ended_at"])
+                            - datetime.fromisoformat(workout["started_at"])).total_seconds())
+        return {"volume_kg": round(volume, 1), "sets": sets,
+                "exercises": len(workout["exercises"]), "duration_s": duration}
+
+    def workouts_since(self, days: int) -> int:
+        cutoff = (self._now() - timedelta(days=days)).isoformat()
+        return sum(1 for w in self.data["workouts"] if w["started_at"] >= cutoff)
+
+    # ---------------------------------------------------------------- records
+    def _best_by_exercise(self, workouts: list[dict]) -> dict[str, dict]:
+        best: dict[str, dict] = {}
+        for w in workouts:
+            for ex in w["exercises"]:
+                b = best.setdefault(ex["exercise_id"], {
+                    "max_weight": None, "max_e1rm": None, "max_reps": None,
+                    "max_volume_set": None, "max_duration_s": None, "max_distance_m": None,
+                })
+                for s in ex["sets"]:
+                    if s.get("type") not in COUNTED_SET_TYPES:
+                        continue
+                    wt, reps = s.get("weight") or 0, s.get("reps") or 0
+                    ctx = {"workout_id": w["id"], "date": w["started_at"], "weight": wt, "reps": reps}
+
+                    def bump(key: str, value: float) -> None:
+                        if value and (b[key] is None or value > b[key]["value"]):
+                            b[key] = {**ctx, "value": round(value, 2)}
+
+                    bump("max_weight", wt)
+                    bump("max_e1rm", estimated_1rm(wt, reps))
+                    bump("max_reps", reps)
+                    bump("max_volume_set", wt * reps)
+                    bump("max_duration_s", s.get("duration_s") or 0)
+                    bump("max_distance_m", s.get("distance_m") or 0)
+        return best
+
+    def records(self) -> list[dict]:
+        out = []
+        for ex_id, rec in self._best_by_exercise(self.data["workouts"]).items():
+            ex = self.exercise(ex_id) or {"id": ex_id, "name": ex_id}
+            out.append({"exercise": ex, **rec})
+        out.sort(key=lambda r: r["exercise"]["name"])
+        return out
+
+    def _detect_prs(self, workout: dict) -> list[dict]:
+        before = self._best_by_exercise(self.data["workouts"])
+        now = self._best_by_exercise([workout])
+        prs = []
+        for ex_id, rec in now.items():
+            prev = before.get(ex_id)
+            if not prev:
+                continue  # first time doing an exercise isn't a PR
+            for key in ("max_weight", "max_e1rm", "max_reps", "max_volume_set"):
+                if rec[key] and (prev[key] is None or rec[key]["value"] > prev[key]["value"]):
+                    prs.append({"exercise_id": ex_id, "kind": key, "value": rec[key]["value"]})
+        return prs
+
+    def last_performance(self, exercise_id: str) -> list[dict]:
+        """Sets from the most recent finished workout containing this exercise."""
+        for w in sorted(self.data["workouts"], key=lambda w: w["started_at"], reverse=True):
+            for ex in w["exercises"]:
+                if ex["exercise_id"] == exercise_id:
+                    return ex["sets"]
+        return []
+
+    def exercise_history(self, exercise_id: str, limit: int = 50) -> list[dict]:
+        out = []
+        for w in sorted(self.data["workouts"], key=lambda w: w["started_at"], reverse=True):
+            for ex in w["exercises"]:
+                if ex["exercise_id"] == exercise_id:
+                    counted = [s for s in ex["sets"] if s.get("type") in COUNTED_SET_TYPES]
+                    out.append({
+                        "workout_id": w["id"], "date": w["started_at"], "sets": ex["sets"],
+                        "best_e1rm": round(max((estimated_1rm(s.get("weight") or 0, s.get("reps") or 0)
+                                                for s in counted), default=0), 1),
+                    })
+            if len(out) >= limit:
+                break
+        return out
+
+    # -------------------------------------------------------------- templates
+    def save_template(self, tpl: dict) -> dict:
+        name = (tpl.get("name") or "").strip()
+        if not name:
+            raise ValidationError("Template name is required")
+        item = {
+            "id": tpl.get("id") or new_id(),
+            "name": name,
+            "notes": tpl.get("notes") or "",
+            "exercises": [
+                {"exercise_id": e["exercise_id"],
+                 "sets": [{"type": s.get("type", "working"), "reps": s.get("reps"),
+                           "weight": s.get("weight")} for s in e.get("sets", [])]}
+                for e in tpl.get("exercises", [])
+            ],
+        }
+        self.data["templates"] = [t for t in self.data["templates"] if t["id"] != item["id"]]
+        self.data["templates"].append(item)
+        self._changed()
+        return item
+
+    def template_from_workout(self, workout_id: str, name: str | None = None) -> dict:
+        w = self.workout(workout_id)
+        if not w:
+            raise ValidationError("Workout not found")
+        return self.save_template({"name": name or w["name"], "exercises": w["exercises"]})
+
+    def delete_template(self, template_id: str) -> None:
+        self.data["templates"] = [t for t in self.data["templates"] if t["id"] != template_id]
+        self._changed()

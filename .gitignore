@@ -1,0 +1,8 @@
+# Raw source export (~280 MB, over GitHub's 100 MB limit) — rebuild foods.db from it locally
+opennutrition_foods.tsv
+*.db.tmp
+dev/dev_data.json
+__pycache__/
+.pytest_cache/
+.venv/
+.DS_Store

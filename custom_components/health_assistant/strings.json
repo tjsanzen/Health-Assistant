@@ -1,0 +1,52 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Health Assistant",
+        "description": "Create a health profile. Link it to a Home Assistant user so the Health panel opens your profile automatically.",
+        "data": {
+          "name": "Profile name",
+          "user_id": "Home Assistant user",
+          "units": "Units"
+        }
+      },
+      "body": {
+        "title": "About you",
+        "description": "Used to calculate your calorie needs. If you know your body fat percentage, the Katch-McArdle formula is used; otherwise Mifflin-St Jeor.",
+        "data": {
+          "weight": "Current weight",
+          "target_weight": "Target weight",
+          "height": "Height",
+          "height_ft": "Height (feet)",
+          "height_in": "Height (inches)",
+          "body_fat_pct": "Body fat % (optional)",
+          "age": "Age",
+          "sex": "Sex (used by the BMR formula)"
+        }
+      },
+      "activity": {
+        "title": "Activity & goal",
+        "description": "Your activity level is estimated from your average daily steps and weekly strength training.",
+        "data": {
+          "daily_steps": "Average steps per day",
+          "lifting_days": "Days per week with ~1 hour of weight training",
+          "goal_rate": "How fast to move toward your target weight"
+        }
+      },
+      "summary": {
+        "title": "Your numbers",
+        "description": "**Formula:** {formula}\n\n**BMR:** {bmr} kcal\n\n**Maintenance:** {maintenance} kcal ({activity}, ×{multiplier})\n\n**Goal:** {goal}\n\n**Daily target:** {target} kcal{floor_note}\n\n**Macros:** {protein} g protein · {fat} g fat · {carbs} g carbs\n\nYou can change any of this later from the Profile tab in the Health panel."
+      }
+    },
+    "error": {
+      "invalid_height": "Height looks out of range."
+    },
+    "abort": {
+      "already_configured": "A profile for this user already exists."
+    }
+  },
+  "selector": {
+    "units": { "options": { "imperial": "Imperial (lb, ft/in)", "metric": "Metric (kg, cm)" } },
+    "sex": { "options": { "male": "Male", "female": "Female" } }
+  }
+}

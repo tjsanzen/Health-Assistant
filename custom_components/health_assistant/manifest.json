@@ -1,0 +1,13 @@
+{
+  "domain": "health_assistant",
+  "name": "Health Assistant",
+  "codeowners": ["@tovin"],
+  "config_flow": true,
+  "dependencies": ["http", "frontend", "panel_custom", "websocket_api"],
+  "documentation": "https://github.com/tovin/health-assistant",
+  "integration_type": "service",
+  "iot_class": "local_polling",
+  "issue_tracker": "https://github.com/tovin/health-assistant/issues",
+  "requirements": [],
+  "version": "0.1.0"
+}
