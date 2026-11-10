@@ -137,13 +137,34 @@ class HealthAssistantPanel extends HTMLElement {
 
   connectedCallback() {
     this._tick = setInterval(() => this._onTick(), 1000);
+    this._vv = () => this._syncViewport();
+    window.visualViewport?.addEventListener("resize", this._vv);
+    window.visualViewport?.addEventListener("scroll", this._vv);
+    window.addEventListener("resize", this._vv);
+    this._syncViewport();
     this._vis = () => { if (document.visibilityState === "hidden") this._flushWorkout(); else if (this._booted) this._refreshActive(); };
     document.addEventListener("visibilitychange", this._vis);
   }
   disconnectedCallback() {
     clearInterval(this._tick);
     document.removeEventListener("visibilitychange", this._vis);
+    window.visualViewport?.removeEventListener("resize", this._vv);
+    window.visualViewport?.removeEventListener("scroll", this._vv);
+    window.removeEventListener("resize", this._vv);
     this._flushWorkout();
+  }
+
+  /* On phones the panel is pinned to the *visible* part of the screen. When the
+   * iOS keyboard opens, the visible area shrinks, so the panel and any open sheet
+   * shrink with it instead of being covered, and the tab bar hides until it closes. */
+  _syncViewport() {
+    const vv = window.visualViewport;
+    const h = vv ? vv.height : window.innerHeight;
+    const top = vv ? vv.offsetTop : 0;
+    const kb = Math.max(0, window.innerHeight - h - top);
+    this.style.setProperty("--vvh", `${h}px`);
+    this.style.setProperty("--vvtop", `${top}px`);
+    this.shadowRoot.querySelector(".app")?.classList.toggle("kb", kb > 80);
   }
 
   /* ------------------------------------------------------------- data I/O */
@@ -254,11 +275,17 @@ class HealthAssistantPanel extends HTMLElement {
       root.addEventListener("input", (e) => this._onInput(e));
       root.addEventListener("change", (e) => this._onChange(e));
       root.addEventListener("keydown", (e) => { if (e.key === "Enter" && e.target.dataset.enter) { e.preventDefault(); this._act(e.target.dataset.enter, e.target, e); } });
+      root.addEventListener("focusin", (e) => {
+        if (!this._narrow || !e.target.matches("input,textarea")) return;
+        setTimeout(() => { this._syncViewport(); e.target.scrollIntoView({ block: "center", behavior: "smooth" }); }, 350);
+      });
+      root.addEventListener("focusout", () => setTimeout(() => this._syncViewport(), 100));
       root.addEventListener("touchstart", (e) => this._dragStart(e), { passive: true });
       root.addEventListener("touchmove", (e) => this._dragMove(e), { passive: false });
       root.addEventListener("touchend", () => this._dragEnd());
       this._wired = true;
     }
+    this._syncViewport();
     this._render();
   }
 
@@ -1486,7 +1513,7 @@ function lineChart(pts) {
 
 /* ================================================================= styles */
 const STYLES = `
-:host { display:block; height:100%; --hp-accent: var(--primary-color, #03a9f4); --hp-good:#34c759; --hp-bad: var(--error-color, #ff3b30);
+:host { display:block; height:100%; overflow:hidden; --hp-accent: var(--primary-color, #03a9f4); --hp-good:#34c759; --hp-bad: var(--error-color, #ff3b30);
   --hp-card: var(--ha-card-background, var(--card-background-color, #fff)); --hp-text: var(--primary-text-color, #212121); --hp-muted: var(--secondary-text-color, #727272);
   --hp-line: var(--divider-color, rgba(0,0,0,.12)); --hp-bg: var(--primary-background-color, #f2f2f7); --hp-fill: color-mix(in srgb, var(--hp-text) 6%, transparent);
   --hp-radius: 14px; --warm:#f5b400; --drop:#8e5cd9; --fail:#ff3b30;
@@ -1502,6 +1529,9 @@ h2 { margin:0 0 4px; font-size:1.25rem; font-weight:650; } h3 { margin:14px 0 8p
 
 /* ---------- shell ---------- */
 .app { display:flex; flex-direction:column; height:100vh; height:100dvh; background:var(--hp-bg); position:relative; overflow:hidden; }
+/* Phones: pin the app to the visible screen so only the content scrolls, never the page. */
+.app.narrow { position:fixed; left:0; right:0; top:var(--vvtop, 0px); height:var(--vvh, 100dvh); overscroll-behavior:none; }
+.app.narrow.kb .bottomnav { display:none; }
 main { flex:1 1 auto; min-height:0; overflow-y:auto; -webkit-overflow-scrolling:touch; overscroll-behavior-y:contain; }
 .wrap { max-width:720px; margin:0 auto; padding:16px 16px 28px; }
 .wrap.widewrap { max-width:1180px; }
@@ -1676,10 +1706,13 @@ label.inline { flex-direction:row; align-items:center; gap:8px; } label.inline s
 .scrim { position:fixed; inset:0; background:rgba(0,0,0,.35); z-index:50; animation:fade .2s; }
 .sheet { position:fixed; left:0; right:0; bottom:0; max-height:calc(100dvh - 44px - env(safe-area-inset-top)); z-index:51; background:var(--hp-card); border-radius:16px 16px 0 0; display:flex; flex-direction:column; box-shadow:0 -4px 30px rgba(0,0,0,.18); }
 .sheet.anim { animation:up .3s cubic-bezier(.2,.9,.3,1); }
+.narrow .sheet { top:auto; bottom:auto; max-height:calc(var(--vvh, 100dvh) - 44px - env(safe-area-inset-top)); }
+.narrow .scrim { top:0; height:100%; }
 .wide .sheet { left:50%; right:auto; bottom:auto; top:50%; transform:translate(-50%,-50%); width:min(560px, 92vw); max-height:86vh; border-radius:16px; }
 .wide .sheet.anim { animation:pop .18s ease-out; }
 .grabzone { padding:8px 0 4px; flex:0 0 auto; touch-action:none; } .grab { width:38px; height:5px; border-radius:3px; background:var(--hp-line); margin:0 auto; } .wide .grabzone { display:none; }
 .sheet .close { position:absolute; top:10px; right:10px; background:var(--hp-fill); width:30px; height:30px; } .sheet .close ha-icon { --mdc-icon-size:18px; }
+.narrow.kb .sheetbody { padding-bottom:16px; }
 .sheetbody { overflow-y:auto; padding:6px 16px calc(20px + env(safe-area-inset-bottom)); -webkit-overflow-scrolling:touch; overscroll-behavior:contain; }
 .wide .sheetbody { padding:20px; }
 .sheetbody > h2:first-child { padding-right:40px; }
