@@ -1706,8 +1706,9 @@ label.inline { flex-direction:row; align-items:center; gap:8px; } label.inline s
 .scrim { position:fixed; inset:0; background:rgba(0,0,0,.35); z-index:50; animation:fade .2s; }
 .sheet { position:fixed; left:0; right:0; bottom:0; max-height:calc(100dvh - 44px - env(safe-area-inset-top)); z-index:51; background:var(--hp-card); border-radius:16px 16px 0 0; display:flex; flex-direction:column; box-shadow:0 -4px 30px rgba(0,0,0,.18); }
 .sheet.anim { animation:up .3s cubic-bezier(.2,.9,.3,1); }
-.narrow .sheet { top:auto; bottom:auto; max-height:calc(var(--vvh, 100dvh) - 44px - env(safe-area-inset-top)); }
-.narrow .scrim { top:0; height:100%; }
+/* Phones: sheets live inside the pinned app, so they sit right on top of the keyboard. */
+.narrow .scrim { position:absolute; inset:0; }
+.narrow .sheet { position:absolute; bottom:0; max-height:calc(100% - 44px - env(safe-area-inset-top)); }
 .wide .sheet { left:50%; right:auto; bottom:auto; top:50%; transform:translate(-50%,-50%); width:min(560px, 92vw); max-height:86vh; border-radius:16px; }
 .wide .sheet.anim { animation:pop .18s ease-out; }
 .grabzone { padding:8px 0 4px; flex:0 0 auto; touch-action:none; } .grab { width:38px; height:5px; border-radius:3px; background:var(--hp-line); margin:0 auto; } .wide .grabzone { display:none; }
