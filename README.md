@@ -1,4 +1,4 @@
-# <img src="custom_components/brand/icon.png" alt="Logo" height="64" style="vertical-align: middle;"> Health Assistant
+# <img src="custom_components/health-assistant/brand/icon.png" alt="Logo" height="64" style="vertical-align: middle;"> Health Assistant
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Home Assistant](https://img.shields.io/badge/Home%20Assistant-2025.2+-41BDF5.svg)](https://www.home-assistant.io/)
