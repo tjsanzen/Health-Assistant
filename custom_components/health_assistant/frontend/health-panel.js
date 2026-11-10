@@ -374,7 +374,7 @@ class HealthAssistantPanel extends HTMLElement {
       const more = w.exercises.length > 4 ? `<div class="muted small">+${w.exercises.length - 4} more</div>` : "";
       const pc = prCount(w);
       return `${mh}<button class="card workout" data-action="openWorkout" data-id="${w.id}">
-        <div class="row between"><b>${esc(w.name)}</b>${pc ? `<span class="badge gold">${icon("mdi:trophy")} ${pc} PR${pc > 1 ? "s" : ""}</span>` : ""}</div>
+        <div class="row between"><b>${esc(w.name)}</b><span class="row">${w.apple_health_saved ? `<span class="badge health" title="Saved to Apple Health">${icon("mdi:heart")} Health</span>` : ""}${pc ? `<span class="badge gold">${icon("mdi:trophy")} ${pc} PR${pc > 1 ? "s" : ""}</span>` : ""}</span></div>
         <div class="muted small">${fmtDate(w.started_at)} · ${fmtTime(w.started_at)}</div>
         <div class="stats">
           <span>${icon("mdi:timer-outline")} ${fmtDur(sm.duration_s)}</span>
@@ -682,7 +682,9 @@ class HealthAssistantPanel extends HTMLElement {
       </div>
       ${s.overview && !s.overview.food_db ? `<div class="card warn small">Food database not found — search shows only your custom foods. See the README to build it.</div>` : ""}
       ${meals}`;
-    return this._head("Nutrition") + `<div class="cols"><div class="colmain">${left}</div><aside class="colside">${this._statsHtml()}</aside></div>`;
+    // OpenNutrition's terms require attribution wherever its data is shown.
+    return this._head("Nutrition") + `<div class="cols"><div class="colmain">${left}</div><aside class="colside">${this._statsHtml()}</aside></div>
+      <p class="attribution">Data Source: <a href="https://www.opennutrition.app" target="_blank" rel="noopener noreferrer">OpenNutrition</a></p>`;
   }
 
   _statsHtml() {
@@ -724,7 +726,7 @@ class HealthAssistantPanel extends HTMLElement {
     const tabs = ["search", "quick", "custom"].map((t) => `<button class="${sh.mode === t ? "on" : ""}" data-action="foodMode" data-mode="${t}">${{ search: "Search", quick: "Quick add", custom: "New food" }[t]}</button>`).join("");
     let body = "";
     if (sh.mode === "search") {
-      body = `<div class="searchbox">${icon("mdi:magnify")}<input id="foodq" type="search" placeholder="Search foods" value="${esc(sh.query || "")}" data-input="foodSearch" autocomplete="off" enterkeyhint="search"></div>
+      body = `<div class="searchbox">${icon("mdi:magnify")}<input id="foodq" type="search" placeholder="Search OpenNutrition Database" value="${esc(sh.query || "")}" data-input="foodSearch" autocomplete="off" enterkeyhint="search"></div>
         <div id="foodresults">${this._foodResults(sh)}</div>`;
     } else if (sh.mode === "quick") {
       body = `<div class="form">
@@ -797,7 +799,11 @@ class HealthAssistantPanel extends HTMLElement {
     if (start != null && target != null && start !== target) pct = Math.max(0, Math.min(100, ((start - cur) / (start - target)) * 100));
     const pts = weights.map((v) => ({ x: new Date(v.recorded_at).getTime(), y: u.wOut(v.value) }));
     const goalWord = { lose: "Lose weight", gain: "Gain weight", maintain: "Maintain" }[e.goal] || "";
-    const tiles = Object.entries(VITALS).map(([k, v]) => {
+    const st = o.steps || {};
+    const stepsTile = `<button class="tile" data-action="stepsInfo">${icon("mdi:walk")}<div class="muted small">Steps</div>
+        <div class="tileval">${st.today != null ? r0(st.today) : "–"}</div>
+        <div class="muted xsmall">${st.sensor ? (st.avg != null ? `${r0(st.avg)} avg · ${st.days}d` : "Today") : "Not connected"}</div></button>`;
+    const tiles = stepsTile + Object.entries(VITALS).map(([k, v]) => {
       const l = o.latest[k];
       let val = "–";
       if (l) {
@@ -834,12 +840,12 @@ class HealthAssistantPanel extends HTMLElement {
           <div><div class="muted small">Carbs</div><b>${r0(e.carbs_g)} g</b></div>
           <div><div class="muted small">Fat</div><b>${r0(e.fat_g)} g</b></div>
         </div>
-        <div class="muted small">${esc(e.formula || "")} · ${esc(e.activity_label || "")} (×${e.activity_multiplier ?? "–"}) · ${r0(p.daily_steps)} steps/day · ${p.lifting_days} lifting day${p.lifting_days === 1 ? "" : "s"}/wk</div>
+        <div class="muted small">${esc(e.formula || "")} · ${esc(e.activity_label || "")} (×${e.activity_multiplier ?? "–"}) · ${r0(e.steps_used ?? p.daily_steps)} steps/day${e.steps_source === "tracked" ? " (iPhone, 14-day avg)" : ""} · ${p.lifting_days} lifting day${p.lifting_days === 1 ? "" : "s"}/wk</div>
         ${manual ? `<div class="muted small">Calculated target: ${r0(e.target_auto)} kcal</div>` : e.daily_adjustment ? `<div class="muted small">${e.daily_adjustment < 0 ? "Deficit" : "Surplus"} of ${r0(Math.abs(e.daily_adjustment))} kcal/day for ${r1(u.wOut(p.goal_rate_kg_week, 2))} ${u.w}/week${e.target_floored ? " (raised to a safe minimum)" : ""}</div>` : ""}
       </div>
       <h3 class="section">Settings</h3>
       <div class="card list">
-        <button class="listrow" data-action="workoutSettings">${icon("mdi:timer-cog-outline")}<span>Workout & rest timer</span><span class="muted">${fmtRest(p.rest_default_s ?? 120)}${p.live_activity_notify ? " · iPhone" : ""}</span>${icon("mdi:chevron-right", "muted")}</button>
+        <button class="listrow" data-action="workoutSettings">${icon("mdi:timer-cog-outline")}<span>iPhone, rest timer & Apple Health</span><span class="muted">${fmtRest(p.rest_default_s ?? 120)}${p.live_activity_notify ? " · iPhone" : ""}</span>${icon("mdi:chevron-right", "muted")}</button>
         <button class="listrow" data-action="editProfile">${icon("mdi:account-edit-outline")}<span>Body & goal</span><span></span>${icon("mdi:chevron-right", "muted")}</button>
       </div>`;
   }
@@ -887,7 +893,7 @@ class HealthAssistantPanel extends HTMLElement {
     const p = this._s.overview.profile;
     const cur = p.rest_default_s ?? 120;
     const targets = sh.targets;
-    return `<h2>Workout & rest timer</h2>
+    return `<h2>iPhone, rest timer & Apple Health</h2>
       <div class="form">
         <label>Default rest timer
           <select data-ws="rest_default_s">${REST_OPTIONS.map((v) => `<option value="${v}" ${v === cur ? "selected" : ""}>${fmtRest(v)}</option>`).join("")}</select></label>
@@ -897,6 +903,14 @@ class HealthAssistantPanel extends HTMLElement {
         ${targets && !targets.length ? `<p class="muted small">No Companion app devices found. Install the Home Assistant app on your phone and sign in first.</p>` : ""}
         <button class="btn soft full" data-action="testLive">${icon("mdi:cellphone-arrow-down")} Send a test (60-second countdown)</button>
         <p class="muted small">Uses Live Activities from the Home Assistant Companion app (iOS 17.2+, Home Assistant 2026.7+). While you rest, your Lock Screen and Dynamic Island count down and show your next set. If the test doesn't appear: allow Live Activities for Home Assistant in iPhone Settings → Home Assistant, accept the one-time Lock Screen notice, and make sure the phone can reach Home Assistant. iOS also limits how many activities can be started in a row, so repeated tests may stop appearing for a while.</p>
+        <h3>Steps</h3>
+        <label>Step counter
+          <select data-ws="steps_sensor"><option value="">Off — use the number from setup</option>${(sh.sensors || []).map((x) => `<option value="${esc(x.entity_id)}" ${x.entity_id === p.steps_sensor ? "selected" : ""}>${esc(x.name)}</option>`).join("")}</select></label>
+        <p class="muted small">Uses the Companion app's step sensor. Once 3 days are recorded, your 14-day average replaces the steps you entered at setup when working out maintenance calories. It counts steps your iPhone detects (not your Apple Watch). If it's missing, turn on the Steps sensor in the Companion app: Settings → Companion app → Sensors.</p>
+        <h3>Apple Health</h3>
+        <label class="inline"><input type="checkbox" data-ws="apple_health_export" ${p.apple_health_export !== false ? "checked" : ""} style="width:auto"> After a workout, offer to save it to Apple Health</label>
+        <label>Shortcut name<input data-ws="apple_health_shortcut" value="${esc(p.apple_health_shortcut || "Health Assistant Log Workout")}"></label>
+        <p class="muted small">You'll get a notification on the phone above when you finish a workout; tapping it runs this Shortcut, which logs a strength workout (time, duration, calories) in Apple Health. See the README for how to build the Shortcut.</p>
         <button class="btn primary full" data-action="saveWorkoutSettings">Save</button>
       </div>`;
   }
@@ -1432,6 +1446,17 @@ class HealthAssistantPanel extends HTMLElement {
           const sh = this._sheet; sh.list = sh.list.filter((x) => x.id !== d.id);
           await this._loadTab(); this._render(); break;
         }
+        case "stepsInfo": {
+          const st = s.overview.steps || {};
+          const rows = Object.entries(st.history || {}).reverse().map(([d, v]) => `<div class="histrow row between"><span>${fmtDate(d + "T12:00:00")}</span><b>${r0(v)}</b></div>`).join("");
+          this._openSheet({ kind: "html", html: `<h2>${icon("mdi:walk")} Steps</h2>
+            <div class="egrid"><div><div class="muted small">Today</div><div class="big">${st.today != null ? r0(st.today) : "–"}</div></div>
+            <div><div class="muted small">14-day avg</div><div class="big">${st.avg != null ? r0(st.avg) : "–"}</div></div>
+            <div><div class="muted small">Used for calories</div><div class="big">${r0(st.used)}</div></div></div>
+            <p class="muted small">${st.sensor ? (st.source === "tracked" ? "Maintenance calories use your tracked average." : `Maintenance calories use the steps from setup until 3 days are tracked (${st.days} so far).`) : "No step counter connected. Pick one in Profile → iPhone, rest timer & Apple Health."}</p>
+            ${rows ? `<h3>Recent days</h3>${rows}` : ""}` });
+          break;
+        }
         case "editProfile": this._openSheet({ kind: "profile" }); break;
         case "editTargets": this._openSheet({ kind: "targets" }); this._updateMacroKcal(); break;
         case "saveTargets": case "resetTargets": {
@@ -1442,9 +1467,9 @@ class HealthAssistantPanel extends HTMLElement {
           s.sheets = []; await this._loadAll(); this._render(); this._toast(action === "resetTargets" ? "Using calculated targets" : "Targets saved"); break;
         }
         case "workoutSettings": {
-          const sh = { kind: "workoutSettings", targets: null };
+          const sh = { kind: "workoutSettings", targets: null, sensors: [] };
           this._openSheet(sh);
-          sh.targets = await this.ws("notify/targets");
+          [sh.targets, sh.sensors] = await Promise.all([this.ws("notify/targets"), this.ws("steps/sensors")]);
           if (this._sheet === sh) this._renderSheet();
           break;
         }
@@ -1455,8 +1480,13 @@ class HealthAssistantPanel extends HTMLElement {
           this._toast(`Test sent to ${r.sent_to} — check your Lock Screen`); break;
         }
         case "saveWorkoutSettings": {
-          const get = (k) => this.shadowRoot.querySelector(`[data-ws="${k}"]`).value;
-          await this.ws("profile/update", { changes: { rest_default_s: Number(get("rest_default_s")), live_activity_notify: get("live_activity_notify") || null } });
+          const el = (k) => this.shadowRoot.querySelector(`[data-ws="${k}"]`);
+          const get = (k) => el(k).value;
+          await this.ws("profile/update", { changes: {
+            rest_default_s: Number(get("rest_default_s")), live_activity_notify: get("live_activity_notify") || null,
+            steps_sensor: get("steps_sensor") || null, apple_health_export: el("apple_health_export").checked,
+            apple_health_shortcut: get("apple_health_shortcut").trim() || null,
+          } });
           s.sheets = []; await this._refreshOverview(); this._render(); this._toast("Saved"); break;
         }
         case "saveProfile": {
@@ -1671,7 +1701,7 @@ main { flex:1 1 auto; min-height:0; overflow-y:auto; -webkit-overflow-scrolling:
 .seg button { flex:1; padding:7px; border-radius:8px; color:var(--hp-text); font-weight:500; font-size:.9rem; }
 .seg button.on { background:var(--hp-card); box-shadow:0 1px 3px rgba(0,0,0,.12); font-weight:600; }
 .badge { display:inline-flex; align-items:center; gap:4px; padding:2px 8px; border-radius:10px; font-size:.72rem; font-weight:600; }
-.badge ha-icon { --mdc-icon-size:14px; } .gold { background:#fff3cd; color:#8a6d00; } .blue { background:color-mix(in srgb, var(--hp-accent) 15%, transparent); color:var(--hp-accent); }
+.badge ha-icon { --mdc-icon-size:14px; } .badge.health { background:#ffe5ea; color:#d3173f; } .gold { background:#fff3cd; color:#8a6d00; } .blue { background:color-mix(in srgb, var(--hp-accent) 15%, transparent); color:var(--hp-accent); }
 
 /* history */
 .month { margin:18px 4px 8px; color:var(--hp-muted); font-weight:600; font-size:.78rem; text-transform:uppercase; letter-spacing:.05em; }
@@ -1756,6 +1786,8 @@ main { flex:1 1 auto; min-height:0; overflow-y:auto; -webkit-overflow-scrolling:
 .tline { position:absolute; left:0; right:0; border-top:1.5px dashed var(--hp-muted); opacity:.7; z-index:1; pointer-events:none; }
 .tline span { position:absolute; right:0; top:-15px; font-size:.65rem; color:var(--hp-muted); }
 .minitiles { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+.attribution { text-align:center; font-size:.72rem; color:var(--hp-muted); margin:16px 0 4px; }
+.attribution a { color:inherit; text-decoration:underline; }
 .searchbox { display:flex; align-items:center; gap:6px; background:var(--hp-fill); border-radius:10px; padding:0 10px; margin-bottom:8px; }
 .searchbox input { border:0; background:transparent; padding:10px 4px; } .searchbox input:focus { background:transparent; border:0; }
 .portion { display:flex; gap:8px; margin:14px 0; } .portion .amount { width:110px; flex:0 0 auto; font-size:1.2rem; text-align:center; font-weight:600; }

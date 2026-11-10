@@ -25,7 +25,11 @@ PROFILE_FIELDS = {
     "calorie_target_override", "protein_override_g", "carbs_override_g", "fat_override_g",
     # Workout settings
     "rest_default_s", "live_activity_notify",
+    # iPhone: step sensor from the Companion app, and Apple Health export
+    "steps_sensor", "apple_health_export", "apple_health_shortcut",
 }
+STEPS_AVG_DAYS = 14
+STEPS_MIN_DAYS = 3  # need this many tracked days before replacing the typed-in average
 COUNTED_SET_TYPES = {"working", "failure", "drop"}  # warm-ups never count toward records
 
 
@@ -44,6 +48,7 @@ def empty_data(profile: dict) -> dict:
         "templates": [],
         "custom_exercises": [],
         "active_workout": None,
+        "steps_log": {},  # "YYYY-MM-DD" -> steps that day (from the Companion app sensor)
     }
 
 
@@ -98,6 +103,7 @@ class HealthModel:
         if "height_cm" in changes:
             self.add_vital("height", {"value": changes["height_cm"]}, note="Profile update")
         self._changed()
+        self._emit("profile_updated", changes)
         return self.profile
 
     def current_age(self) -> float:
@@ -131,12 +137,13 @@ class HealthModel:
             age=self.current_age(),
             sex=self.profile.get("sex", "male"),
             body_fat_pct=self.current_body_fat(),
-            daily_steps=int(self.profile.get("daily_steps") or 0),
+            daily_steps=int(self.steps_for_energy()[0]),
             lifting_days=int(self.profile.get("lifting_days") or 0),
             target_weight_kg=self.profile.get("target_weight_kg"),
             goal_rate_kg_week=float(self.profile.get("goal_rate_kg_week") or 0),
         )
         out = res.as_dict()
+        out["steps_used"], out["steps_source"] = self.steps_for_energy()
         # Manual overrides from the Profile tab win over the calculated numbers.
         p = self.profile
         out["target_auto"] = out["target"]
@@ -157,6 +164,40 @@ class HealthModel:
             out["carbs_g"] = round(max(0.0, (out["target"] - out["protein_g"] * 4 - out["fat_g"] * 9) / 4), 1)
         out["macros_manual"] = manual_macros
         return out
+
+    # ------------------------------------------------------------------ steps
+    def record_steps(self, day: str, steps: int) -> bool:
+        """Keep the highest reading per day (the phone's counter only goes up until midnight)."""
+        steps = int(steps)
+        log = self.data["steps_log"]
+        if steps < 0 or log.get(day, -1) >= steps:
+            return False
+        log[day] = steps
+        self._changed()
+        return True
+
+    def steps_today(self) -> int | None:
+        return self.data["steps_log"].get(self.today())
+
+    def steps_average(self, days: int = STEPS_AVG_DAYS) -> tuple[float | None, int]:
+        """Average over recent *complete* days (today is still in progress)."""
+        today = self._now().date()
+        start = (today - timedelta(days=days)).isoformat()
+        vals = [v for d, v in self.data["steps_log"].items() if start <= d < today.isoformat()]
+        return (round(sum(vals) / len(vals)) if vals else None), len(vals)
+
+    def steps_for_energy(self) -> tuple[int, str]:
+        avg, n = self.steps_average()
+        if avg is not None and n >= STEPS_MIN_DAYS:
+            return int(avg), "tracked"
+        return int(self.profile.get("daily_steps") or 0), "profile"
+
+    def steps_summary(self) -> dict:
+        avg, n = self.steps_average()
+        used, source = self.steps_for_energy()
+        return {"today": self.steps_today(), "avg": avg, "days": n, "used": used, "source": source,
+                "sensor": self.profile.get("steps_sensor"),
+                "history": dict(sorted(self.data["steps_log"].items())[-30:])}
 
     # ------------------------------------------------------------------- food
     def add_food(self, entry: dict) -> dict:
@@ -492,6 +533,16 @@ class HealthModel:
         self.data["active_workout"] = None
         self._changed()
         self._emit("workout_ended", None)
+
+    def mark_saved_to_health(self, workout_id: str | None = None) -> dict | None:
+        """Flag a workout as logged in Apple Health (default: newest one not yet flagged)."""
+        items = sorted(self.data["workouts"], key=lambda w: w["started_at"], reverse=True)
+        w = next((x for x in items if x["id"] == workout_id), None) if workout_id else \
+            next((x for x in items if not x.get("apple_health_saved")), None)
+        if w:
+            w["apple_health_saved"] = True
+            self._changed()
+        return w
 
     def delete_workout(self, workout_id: str) -> None:
         self.data["workouts"] = [w for w in self.data["workouts"] if w["id"] != workout_id]

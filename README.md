@@ -81,6 +81,32 @@ The countdown ticks on the phone itself, so it keeps going with the panel closed
 
 Requires Companion app 2026.9+, iOS 17.2+ and Home Assistant 2026.7+. Live Activities must also be allowed for Home Assistant in iPhone Settings, and the phone needs to reach HA (remote access when you're at the gym). Apple ends Live Activities after 8 hours and limits how many can be started in a row.
 
+## Steps from your iPhone
+
+When you pick your phone during setup, Health Assistant connects that phone's Companion app step sensor (`sensor.<phone>_steps`). You can change it under Profile → iPhone, rest timer & Apple Health.
+- Health Assistant keeps one total per day.
+- Once 3 days are recorded, your 14-day average replaces the steps you entered at setup in the maintenance-calorie estimate.
+- The Steps tile on the Profile tab shows today's count, your average and the last 30 days.
+- New sensors: `Steps today` and `Average steps`.
+
+The sensor counts steps your iPhone detects, not your Apple Watch. If it's missing, turn it on in the Companion app under Settings → Companion app → Sensors.
+
+## Saving workouts to Apple Health
+
+Home Assistant can't write to Apple Health itself; only an app on the phone can. So when you finish a workout, Health Assistant sends a **"Save to Apple Health?"** notification to your phone. Tapping it runs an Apple Shortcut that logs the workout. Before iOS 27, iOS requires that tap before a notification may run a Shortcut. Afterwards the workout shows a ♥ Health badge in History.
+
+What gets saved: a Traditional Strength Training workout with the right start time, duration and estimated calories. Calories use 5 METs × your weight × duration. Sets, reps and weights stay in Health Assistant, because the Health app's Log Workout action has nowhere to put them.
+
+**Build the Shortcut once** (Shortcuts app → +), named exactly **Health Assistant Log Workout**, or change the name in Profile → iPhone, rest timer & Apple Health:
+
+1. **Get Dictionary from** *Shortcut Input*.
+2. **Get Value for** `start` **in** *Dictionary*, then **Get Dates from** *Dictionary Value*.
+3. **Get Value for** `duration_min` **in** *Dictionary*.
+4. **Get Value for** `kcal` **in** *Dictionary*.
+5. **Log Workout**: type *Traditional Strength Training*, Date = the date from step 2, Duration = the value from step 3 in *minutes*, Calories = the value from step 4 in *kcal*.
+
+The input also includes `title`, `end` and `workout_id` if you want them. The first run asks for Health permission. You can turn the notification off in Profile.
+
 ## How the numbers are calculated
 
 - **BMR**: Katch-McArdle (`370 + 21.6 × lean mass kg`) when body fat is known, otherwise Mifflin-St Jeor.

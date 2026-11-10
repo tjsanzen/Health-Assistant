@@ -11,9 +11,11 @@ from homeassistant.util import slugify
 from homeassistant.util.unit_system import METRIC_SYSTEM
 
 from .calculations import calculate_energy
+from .iphone import step_sensor_for_phone
 from .const import (
     CM_PER_IN, CONF_AGE, CONF_BODY_FAT, CONF_GOAL_RATE, CONF_GOAL_RATE_INPUT, CONF_HEIGHT,
     CONF_HEIGHT_CM, CONF_HEIGHT_FT, CONF_HEIGHT_IN, CONF_LIFT_DAYS, CONF_LIVE_ACTIVITY, CONF_NAME, CONF_SEX,
+    CONF_STEPS_SENSOR,
     CONF_STEPS, CONF_TARGET_WEIGHT, CONF_TARGET_WEIGHT_KG, CONF_UNITS, CONF_USER_ID,
     CONF_WEIGHT, CONF_WEIGHT_KG, DOMAIN, LB_PER_KG, SEX_FEMALE, SEX_MALE, UNITS_IMPERIAL,
     UNITS_METRIC,
@@ -117,10 +119,13 @@ class HealthAssistantConfigFlow(ConfigFlow, domain=DOMAIN):
             self._data[CONF_LIFT_DAYS] = int(user_input[CONF_LIFT_DAYS])
             phone = user_input.get(CONF_LIVE_ACTIVITY)
             self._data[CONF_LIVE_ACTIVITY] = None if phone in (None, NO_USER) else phone
+            # Use that phone's step counter (Companion app pedometer sensor) automatically.
+            entry_id = next((eid for svc, _, _, eid in self._companion_phones() if svc == phone), None)
+            self._data[CONF_STEPS_SENSOR] = step_sensor_for_phone(self.hass, entry_id)
             return await self.async_step_summary()
 
         phones = self._companion_phones()
-        default_phone = next((svc for svc, _, uid in phones if uid and uid == self._data.get(CONF_USER_ID)), NO_USER)
+        default_phone = next((svc for svc, _, uid, _ in phones if uid and uid == self._data.get(CONF_USER_ID)), NO_USER)
         schema = vol.Schema({
             vol.Required(CONF_STEPS, default=6000): _num(0, 40000, 500, "steps/day"),
             vol.Required(CONF_LIFT_DAYS, default=3): _num(0, 7, 1, "days/week"),
@@ -128,23 +133,23 @@ class HealthAssistantConfigFlow(ConfigFlow, domain=DOMAIN):
                 0, 2 if imperial else 1, 0.05, "lb/week" if imperial else "kg/week"),
             vol.Optional(CONF_LIVE_ACTIVITY, default=default_phone): selector.SelectSelector(
                 selector.SelectSelectorConfig(options=[selector.SelectOptionDict(value=NO_USER, label="Off")] + [
-                    selector.SelectOptionDict(value=svc, label=name) for svc, name, _ in phones
+                    selector.SelectOptionDict(value=svc, label=name) for svc, name, _, _ in phones
                 ])),
         })
         return self.async_show_form(step_id="activity", data_schema=schema)
 
-    def _companion_phones(self) -> list[tuple[str, str, str | None]]:
-        """(notify service, device name, HA user id) for each Companion app phone."""
+    def _companion_phones(self) -> list[tuple[str, str, str | None, str | None]]:
+        """(notify service, device name, HA user id, mobile_app entry id) for each phone."""
         services = self.hass.services.async_services().get("notify", {})
         out = []
         for entry in self.hass.config_entries.async_entries("mobile_app"):
             name = entry.data.get("device_name") or entry.title
             svc = f"mobile_app_{slugify(name)}"
             if svc in services:
-                out.append((svc, name, entry.data.get("user_id")))
+                out.append((svc, name, entry.data.get("user_id"), entry.entry_id))
         # Phones the mobile_app entries didn't explain (renamed devices etc.)
-        known = {svc for svc, _, _ in out}
-        out += [(s, s.removeprefix("mobile_app_").replace("_", " "), None)
+        known = {svc for svc, _, _, _ in out}
+        out += [(s, s.removeprefix("mobile_app_").replace("_", " "), None, None)
                 for s in sorted(services) if s.startswith("mobile_app_") and s not in known]
         return out
 

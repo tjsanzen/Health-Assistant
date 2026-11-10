@@ -208,7 +208,7 @@ def test_rest_timer_and_events():
     m.finish_workout()
     assert "rest" not in m.data["workouts"][-1]
     assert m.rest_for("squat") == 150 and m.last_info("squat")["rest_s"] == 150
-    assert m.events == ["workout_started", "rest", "workout_ended"]
+    assert [e for e in m.events if e != "profile_updated"] == ["workout_started", "rest", "workout_ended"]
 
 
 if __name__ == "__main__":

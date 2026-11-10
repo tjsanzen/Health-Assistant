@@ -91,6 +91,13 @@ SENSORS: tuple[HealthSensorDescription, ...] = (
     HealthSensorDescription(key="blood_pressure", name="Blood pressure", icon="mdi:heart",
                             value_fn=lambda m: (f"{v['systolic']:.0f}/{v['diastolic']:.0f}"
                                                 if (v := m.latest_vital("blood_pressure")) else None)),
+    HealthSensorDescription(key="steps_today", name="Steps today", icon="mdi:walk",
+                            native_unit_of_measurement="steps", state_class=SensorStateClass.TOTAL,
+                            value_fn=lambda m: m.steps_today()),
+    HealthSensorDescription(key="steps_average", name="Average steps", icon="mdi:shoe-print",
+                            native_unit_of_measurement="steps",
+                            value_fn=lambda m: m.steps_average()[0],
+                            attrs_fn=lambda m: {"days": m.steps_average()[1], "used_for_calories": m.steps_for_energy()[1] == "tracked"}),
     HealthSensorDescription(key="last_workout", name="Last workout", icon="mdi:dumbbell",
                             device_class=SensorDeviceClass.TIMESTAMP, value_fn=_last_workout),
     HealthSensorDescription(key="workouts_7d", name="Workouts this week", icon="mdi:calendar-check",

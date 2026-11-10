@@ -17,12 +17,13 @@ from homeassistant.util import dt as dt_util
 
 from .const import (
     CONF_AGE, CONF_BODY_FAT, CONF_GOAL_RATE, CONF_HEIGHT_CM, CONF_LIFT_DAYS, CONF_NAME,
-    CONF_LIVE_ACTIVITY, CONF_SEX, CONF_STEPS, CONF_TARGET_WEIGHT_KG, CONF_UNITS, CONF_USER_ID, CONF_WEIGHT_KG,
+    CONF_LIVE_ACTIVITY, CONF_STEPS_SENSOR, CONF_SEX, CONF_STEPS, CONF_TARGET_WEIGHT_KG, CONF_UNITS, CONF_USER_ID, CONF_WEIGHT_KG,
     DOMAIN, PANEL_COMPONENT, PANEL_ICON, PANEL_TITLE, PANEL_URL_PATH, SIGNAL_DATA_UPDATED,
     STATIC_URL, STORAGE_KEY, STORAGE_VERSION,
 )
 from .food_db import FoodDatabase
 from .library import DATA_DIR, DEMOS_DIR, ExerciseLibrary
+from .iphone import AppleHealthExport, StepsTracker
 from .live_activity import LiveActivity
 from .model import HealthModel, empty_data
 from .websocket_api import async_register_websocket_commands
@@ -37,6 +38,8 @@ class HealthRuntime:
     model: HealthModel
     store: Store
     live: LiveActivity
+    steps: StepsTracker
+    health: AppleHealthExport
 
 
 type HealthConfigEntry = ConfigEntry[HealthRuntime]
@@ -111,6 +114,8 @@ def _initial_data(entry: ConfigEntry, now_iso: str, today: str) -> dict:
         "lifting_days": d[CONF_LIFT_DAYS],
         "goal_rate_kg_week": d[CONF_GOAL_RATE],
         "live_activity_notify": d.get(CONF_LIVE_ACTIVITY),
+        "steps_sensor": d.get(CONF_STEPS_SENSOR),
+        "apple_health_export": True,
     }
     data = empty_data(profile)
     # Seed the health-stat history with the setup answers.
@@ -147,8 +152,22 @@ async def async_setup_entry(hass: HomeAssistant, entry: HealthConfigEntry) -> bo
         return ex["name"] if ex else ex_id
 
     live = LiveActivity(hass, lambda: model.profile, _exercise_name)
-    model = HealthModel(data, _save, dt_util.now, library=library.all, emit=live.handle)
-    entry.runtime_data = HealthRuntime(model=model, store=store, live=live)
+
+    @callback
+    def _emit(event: str, payload) -> None:
+        live.handle(event, payload)
+        health.handle(event, payload)
+        if event == "profile_updated" and "steps_sensor" in payload:
+            steps.start()
+
+    model = HealthModel(data, _save, dt_util.now, library=library.all, emit=_emit)
+    steps = StepsTracker(hass, model)
+    health = AppleHealthExport(hass, model)
+    entry.runtime_data = HealthRuntime(model=model, store=store, live=live, steps=steps, health=health)
+
+    steps.start()
+    entry.async_on_unload(steps.stop)
+    entry.async_on_unload(hass.bus.async_listen("ios.shortcut_run", health.shortcut_finished))
 
     # Day rollover: refresh "today" sensors just after midnight
     @callback

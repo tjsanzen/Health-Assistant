@@ -107,6 +107,7 @@ def _overview(hass, model: HealthModel, msg):
         "workouts_7d": model.workouts_since(7),
         "food_db": hass.data[DOMAIN]["food_db"].available,
         "chime_url": hass.data[DOMAIN].get("chime_url"),
+        "steps": model.steps_summary(),
     }
 
 
@@ -250,6 +251,12 @@ async def _live_test(hass, model, msg):
         raise ValidationError(f"notify.{msg['service']} doesn't exist")
     await LiveActivity(hass, lambda: model.profile, lambda x: x).async_test(msg["service"])
     return {"sent_to": f"notify.{msg['service']}"}
+
+
+@command("steps/sensors")
+def _steps_sensors(hass, model, msg):
+    from .iphone import step_sensors
+    return step_sensors(hass)
 
 
 @command("notify/targets")
