@@ -14,7 +14,7 @@ Workout, Nutrition, and Health Datapoint logging inside of Home Assistant. Track
 
 ## Installation
 
-<a href="https://my.home-assistant.io/redirect/hacs_repository/?owner=smkrv&repository=ha-metar-weather&category=Integration"><img src="https://my.home-assistant.io/badges/hacs_repository.svg" width="210" height="auto"></a>
+<a href="https://my.home-assistant.io/redirect/hacs_repository/?owner=tjsanzen&repository=health-assistant&category=Integration"><img src="https://my.home-assistant.io/badges/hacs_repository.svg" width="210" height="auto"></a>
 
 
 ## What's in v0.1
