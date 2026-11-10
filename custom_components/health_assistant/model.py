@@ -15,9 +15,17 @@ from typing import Any, Callable
 
 from .calculations import calculate_energy, estimated_1rm
 from .const import MEALS, SET_TYPES, VITAL_TYPES
-from .exercises import BUILTIN_EXERCISES
 
 RECENT_FOODS_MAX = 40
+DEFAULT_REST_S = 120
+PROFILE_FIELDS = {
+    "name", "units", "sex", "age", "height_cm", "target_weight_kg", "daily_steps",
+    "lifting_days", "goal_rate_kg_week",
+    # Manual targets (None = use the calculated value)
+    "calorie_target_override", "protein_override_g", "carbs_override_g", "fat_override_g",
+    # Workout settings
+    "rest_default_s", "live_activity_notify",
+}
 COUNTED_SET_TYPES = {"working", "failure", "drop"}  # warm-ups never count toward records
 
 
@@ -49,10 +57,14 @@ class HealthModel:
         data: dict,
         save: Callable[[], None],
         now: Callable[[], datetime],
+        library: Callable[[], list[dict]] = lambda: [],
+        emit: Callable[[str, Any], None] | None = None,
     ) -> None:
         self.data = data
         self._save = save
         self._now = now
+        self._library = library
+        self._emit_cb = emit
         for key, default in empty_data({}).items():
             self.data.setdefault(key, copy.deepcopy(default))
 
@@ -63,19 +75,23 @@ class HealthModel:
     def _changed(self) -> None:
         self._save()
 
+    def _emit(self, event: str, payload: Any = None) -> None:
+        if self._emit_cb:
+            self._emit_cb(event, payload)
+
     # ---------------------------------------------------------------- profile
     @property
     def profile(self) -> dict:
         return self.data["profile"]
 
     def update_profile(self, changes: dict) -> dict:
-        allowed = {
-            "name", "units", "sex", "age", "height_cm", "target_weight_kg",
-            "daily_steps", "lifting_days", "goal_rate_kg_week",
-        }
         for k, v in changes.items():
-            if k not in allowed:
+            if k not in PROFILE_FIELDS:
                 raise ValidationError(f"Unknown profile field: {k}")
+            if k.endswith("_override") or k.endswith("_override_g"):
+                v = None if v in (None, "", 0) else round(float(v))
+                if v is not None and v < 0:
+                    raise ValidationError("Targets can't be negative")
             self.profile[k] = v
         if "age" in changes:
             self.profile["age_recorded"] = self.today()
@@ -120,7 +136,27 @@ class HealthModel:
             target_weight_kg=self.profile.get("target_weight_kg"),
             goal_rate_kg_week=float(self.profile.get("goal_rate_kg_week") or 0),
         )
-        return res.as_dict()
+        out = res.as_dict()
+        # Manual overrides from the Profile tab win over the calculated numbers.
+        p = self.profile
+        out["target_auto"] = out["target"]
+        out["macros_auto"] = {"protein_g": out["protein_g"], "fat_g": out["fat_g"], "carbs_g": out["carbs_g"]}
+        out["target_manual"] = bool(p.get("calorie_target_override"))
+        if out["target_manual"]:
+            out["target"] = float(p["calorie_target_override"])
+            out["fat_g"] = round(out["target"] * 0.25 / 9, 1)
+            out["carbs_g"] = round(max(0.0, (out["target"] - out["protein_g"] * 4 - out["fat_g"] * 9) / 4), 1)
+        manual_macros = []
+        for key, field in (("protein_g", "protein_override_g"), ("fat_g", "fat_override_g"),
+                           ("carbs_g", "carbs_override_g")):
+            if p.get(field):
+                out[key] = float(p[field])
+                manual_macros.append(key)
+        if manual_macros and "carbs_g" not in manual_macros:
+            # Carbs fill whatever calories the fixed macros leave.
+            out["carbs_g"] = round(max(0.0, (out["target"] - out["protein_g"] * 4 - out["fat_g"] * 9) / 4), 1)
+        out["macros_manual"] = manual_macros
+        return out
 
     # ------------------------------------------------------------------- food
     def add_food(self, entry: dict) -> dict:
@@ -207,6 +243,48 @@ class HealthModel:
             } if energy else None,
         }
 
+    def food_stats(self) -> dict:
+        """Averages over logged days. Today is excluded because it isn't finished yet."""
+        today = self._now().date()
+        by_day: dict[str, dict] = {}
+        for i in self.data["food_log"]:
+            d = by_day.setdefault(i["date"], {"kcal": 0.0, "protein": 0.0, "carbs": 0.0, "fat": 0.0})
+            for k in d:
+                d[k] += i.get(k) or 0
+        past = {d: v for d, v in by_day.items() if d < today.isoformat()}
+        energy = self.energy()
+        target = energy["target"] if energy else None
+
+        def window(days: int | None) -> dict:
+            if days is None:
+                picked = past
+            else:
+                start = (today - timedelta(days=days)).isoformat()
+                picked = {d: v for d, v in past.items() if d >= start}
+            n = len(picked)
+            avg = {k: round(sum(v[k] for v in picked.values()) / n, 1) if n else None
+                   for k in ("kcal", "protein", "carbs", "fat")}
+            on_target = None
+            if n and target:
+                on_target = sum(1 for v in picked.values() if abs(v["kcal"] - target) <= target * 0.1)
+            return {"days_logged": n, "avg": avg, "on_target_days": on_target}
+
+        streak, d = 0, today if today.isoformat() in by_day else today - timedelta(days=1)
+        while d.isoformat() in by_day:
+            streak += 1
+            d -= timedelta(days=1)
+
+        series = []
+        for back in range(13, -1, -1):
+            day = (today - timedelta(days=back)).isoformat()
+            series.append({"date": day, "kcal": round(by_day.get(day, {}).get("kcal", 0))})
+
+        first = min(by_day) if by_day else None
+        return {
+            "d7": window(7), "d30": window(30), "all": window(None),
+            "first_day": first, "streak": streak, "series": series, "target": target,
+        }
+
     def add_custom_food(self, food: dict) -> dict:
         if not food.get("name"):
             raise ValidationError("Food name is required")
@@ -271,7 +349,7 @@ class HealthModel:
 
     # -------------------------------------------------------------- exercises
     def exercises(self) -> list[dict]:
-        return BUILTIN_EXERCISES + self.data["custom_exercises"]
+        return list(self._library()) + self.data["custom_exercises"]
 
     def exercise(self, exercise_id: str) -> dict | None:
         return next((e for e in self.exercises() if e["id"] == exercise_id), None)
@@ -286,6 +364,8 @@ class HealthModel:
             "muscle": ex.get("muscle") or "Other",
             "equipment": ex.get("equipment") or "Other",
             "kind": ex.get("kind") or "weight_reps",
+            "instructions": [],
+            "demo_url": None,
             "custom": True,
         }
         self.data["custom_exercises"].append(item)
@@ -320,6 +400,8 @@ class HealthModel:
                     "id": new_id(),
                     "exercise_id": tex["exercise_id"],
                     "notes": "",
+                    "rest_s": tex.get("rest_s", self.rest_for(tex["exercise_id"])),
+                    "superset": tex.get("superset"),
                     "sets": [self._blank_set(s, s.get("type", "working")) for s in tex["sets"]],
                 })
         workout = {
@@ -330,10 +412,33 @@ class HealthModel:
             "ended_at": None,
             "notes": "",
             "exercises": exercises,
+            "rest": None,
         }
         self.data["active_workout"] = workout
         self._changed()
+        self._emit("workout_started", workout)
         return workout
+
+    def rest_for(self, exercise_id: str) -> int:
+        """Rest time last used for this exercise, else the profile default."""
+        for w in sorted(self.data["workouts"], key=lambda w: w["started_at"], reverse=True):
+            for ex in w["exercises"]:
+                if ex["exercise_id"] == exercise_id and ex.get("rest_s") is not None:
+                    return int(ex["rest_s"])
+        return int(self.profile.get("rest_default_s") or DEFAULT_REST_S)
+
+    def set_rest(self, ends_at: float | None, total: int | None = None,
+                 exercise_id: str | None = None) -> dict | None:
+        """Start, adjust (call again) or clear (ends_at=None) the rest timer."""
+        active = self.data["active_workout"]
+        if not active:
+            raise ValidationError("No workout in progress")
+        active["rest"] = None if ends_at is None else {
+            "ends_at": float(ends_at), "total": int(total or 0), "exercise_id": exercise_id,
+        }
+        self._changed()
+        self._emit("rest", {"workout": active, "rest": active["rest"]})
+        return active["rest"]
 
     def _default_workout_name(self) -> str:
         h = self._now().hour
@@ -345,8 +450,9 @@ class HealthModel:
         if not active or active["id"] != workout.get("id"):
             raise ValidationError("No matching workout in progress")
         self._validate_workout(workout)
-        # Never let the client move the start time silently
+        # Never let the client move the start time silently; rest is managed by set_rest
         workout["started_at"] = workout.get("started_at") or active["started_at"]
+        workout["rest"] = active.get("rest")
         self.data["active_workout"] = workout
         self._changed()
         return workout
@@ -367,6 +473,7 @@ class HealthModel:
         if not active:
             raise ValidationError("No workout in progress")
         workout = copy.deepcopy(active)
+        workout.pop("rest", None)
         workout["ended_at"] = self._now().isoformat()
         # Drop incomplete sets and exercises left empty
         for ex in workout["exercises"]:
@@ -377,11 +484,13 @@ class HealthModel:
         self.data["workouts"].append(workout)
         self.data["active_workout"] = None
         self._changed()
+        self._emit("workout_ended", workout)
         return workout
 
     def discard_workout(self) -> None:
         self.data["active_workout"] = None
         self._changed()
+        self._emit("workout_ended", None)
 
     def delete_workout(self, workout_id: str) -> None:
         self.data["workouts"] = [w for w in self.data["workouts"] if w["id"] != workout_id]
@@ -462,6 +571,9 @@ class HealthModel:
                     prs.append({"exercise_id": ex_id, "kind": key, "value": rec[key]["value"]})
         return prs
 
+    def last_info(self, exercise_id: str) -> dict:
+        return {"sets": self.last_performance(exercise_id), "rest_s": self.rest_for(exercise_id)}
+
     def last_performance(self, exercise_id: str) -> list[dict]:
         """Sets from the most recent finished workout containing this exercise."""
         for w in sorted(self.data["workouts"], key=lambda w: w["started_at"], reverse=True):
@@ -496,6 +608,8 @@ class HealthModel:
             "notes": tpl.get("notes") or "",
             "exercises": [
                 {"exercise_id": e["exercise_id"],
+                 "rest_s": e.get("rest_s"),
+                 "superset": e.get("superset"),
                  "sets": [{"type": s.get("type", "working"), "reps": s.get("reps"),
                            "weight": s.get("weight")} for s in e.get("sets", [])]}
                 for e in tpl.get("exercises", [])

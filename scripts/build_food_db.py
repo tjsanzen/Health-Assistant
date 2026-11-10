@@ -6,12 +6,10 @@ inside Home Assistant. This script keeps only what the app needs (name, brand,
 serving, core macros, barcode) and writes a compact SQLite file with a full-text
 search index.
 
-Usage:
-    python3 scripts/build_food_db.py opennutrition_foods.tsv \
-        custom_components/health_assistant/data/foods.db
-
-Copy the result to <HA config>/health_assistant/foods.db (preferred, survives
-HACS updates) or leave it in custom_components/health_assistant/data/.
+Usage (defaults shown):
+    python3 scripts/build_food_db.py \
+        [custom_components/health_assistant/data/opennutrition_foods.tsv] \
+        [custom_components/health_assistant/data/foods.db]
 """
 from __future__ import annotations
 
@@ -181,7 +179,12 @@ def main(src: str, dst: str) -> None:
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 3:
+    data = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                        "custom_components", "health_assistant", "data")
+    args = sys.argv[1:]
+    if args and args[0] in ("-h", "--help"):
         print(__doc__)
-        sys.exit(1)
-    main(sys.argv[1], sys.argv[2])
+        sys.exit(0)
+    src = args[0] if len(args) > 0 else os.path.join(data, "opennutrition_foods.tsv")
+    dst = args[1] if len(args) > 1 else os.path.join(data, "foods.db")
+    main(src, dst)

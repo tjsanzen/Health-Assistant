@@ -26,13 +26,14 @@ DATA_FILE = os.path.join(HERE, "dev_data.json")
 pkg = types.ModuleType("hp")
 pkg.__path__ = [PKG]
 sys.modules["hp"] = pkg
-for name in ("const", "calculations", "exercises", "model", "food_db"):
+for name in ("const", "calculations", "library", "model", "food_db"):
     spec = importlib.util.spec_from_file_location(f"hp.{name}", os.path.join(PKG, f"{name}.py"))
     mod = importlib.util.module_from_spec(spec)
     sys.modules[f"hp.{name}"] = mod
     spec.loader.exec_module(mod)
 model_mod = sys.modules["hp.model"]
 FoodDatabase = sys.modules["hp.food_db"].FoodDatabase
+library = sys.modules["hp.library"].ExerciseLibrary(demo_url="/custom_components/health_assistant/data/demos")
 
 db = FoodDatabase([os.path.join(PKG, "data", "foods.db")])
 
@@ -46,7 +47,7 @@ def seed() -> dict:
         "daily_steps": 8000, "lifting_days": 4, "goal_rate_kg_week": 0.23,
     })
     clock = {"t": now - timedelta(days=42)}
-    m = model_mod.HealthModel(data, lambda: None, lambda: clock["t"])
+    m = model_mod.HealthModel(data, lambda: None, lambda: clock["t"], library=library.all)
     for i in range(0, 43, 3):
         clock["t"] = now - timedelta(days=42 - i, hours=-7)
         m.add_vital("weight", {"value": 84 - i * 0.07 + (0.3 if i % 2 else -0.2)})
@@ -71,6 +72,15 @@ def seed() -> dict:
             m.finish_workout()
     for name, exs in plan:
         m.save_template({"name": name, "exercises": [{"exercise_id": e, "sets": [{"type": "working", "reps": 8}] * 3} for e, _ in exs]})
+    import random
+    random.seed(4)
+    for back in range(1, 26):
+        if back % 6 == 0:
+            continue  # a few unlogged days
+        clock["t"] = now - timedelta(days=back)
+        kcal = random.randint(1850, 2650)
+        m.add_food({"meal": "lunch", "name": "Meals (demo)", "amount": 1, "unit": "quick", "kcal": kcal,
+                    "protein": kcal * 0.3 / 4, "carbs": kcal * 0.45 / 4, "fat": kcal * 0.25 / 9, "remember": False})
     clock["t"] = now
     for meal, q in (("breakfast", "greek yogurt"), ("breakfast", "banana"), ("lunch", "chicken breast"), ("lunch", "rice cooked")):
         res = db.search(q, 1)
@@ -95,7 +105,8 @@ def save() -> None:
         json.dump(DATA, fh)
 
 
-M = model_mod.HealthModel(DATA, save, datetime.now)
+M = model_mod.HealthModel(DATA, save, datetime.now, library=library.all,
+                          emit=lambda ev, payload: print(f"[live activity] {ev}"))
 save()
 
 C = {
@@ -120,7 +131,10 @@ C = {
     "exercises/list": lambda m: m.exercises(),
     "exercises/create": lambda m, exercise: m.add_exercise(exercise),
     "exercises/history": lambda m, exercise_id: m.exercise_history(exercise_id),
-    "exercises/last": lambda m, exercise_ids: {e: m.last_performance(e) for e in exercise_ids},
+    "exercises/last": lambda m, exercise_ids: {e: m.last_info(e) for e in exercise_ids},
+    "rest/set": lambda m, ends_at, total=None, exercise_id=None: m.set_rest(ends_at, total, exercise_id),
+    "notify/targets": lambda m: ["mobile_app_demo_iphone"],
+    "food/stats": lambda m: m.food_stats(),
     "workout/start": lambda m, template_id=None, name=None: m.start_workout(template_id, name),
     "workout/active": lambda m: m.data["active_workout"],
     "workout/update": lambda m, workout: m.update_active_workout(workout),

@@ -15,6 +15,7 @@ from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant, callback
 
 from .const import DOMAIN, VITAL_TYPES
+from .live_activity import notify_targets
 from .model import HealthModel, ValidationError
 
 Handler = Callable[[HomeAssistant, HealthModel, dict], Any | Awaitable[Any]]
@@ -133,6 +134,11 @@ def _food_recent(hass, model, msg):
     return {"recent": model.data["recent_foods"], "custom": model.data["custom_foods"]}
 
 
+@command("food/stats")
+def _food_stats(hass, model, msg):
+    return model.food_stats()
+
+
 @command("food/day", {vol.Optional("date"): str})
 def _food_day(hass, model, msg):
     return model.food_day(msg.get("date"))
@@ -189,7 +195,9 @@ def _vitals_delete(hass, model, msg):
 
 # ------------------------------------------------------------------ exercises
 @command("exercises/list")
-def _exercises(hass, model, msg):
+async def _exercises(hass, model, msg):
+    # The library re-reads exercises.json when it changes, which touches the disk.
+    await hass.async_add_executor_job(hass.data[DOMAIN]["library"].all)
     return model.exercises()
 
 
@@ -205,7 +213,7 @@ def _exercise_history(hass, model, msg):
 
 @command("exercises/last", {vol.Required("exercise_ids"): [str]})
 def _exercise_last(hass, model, msg):
-    return {eid: model.last_performance(eid) for eid in msg["exercise_ids"]}
+    return {eid: model.last_info(eid) for eid in msg["exercise_ids"]}
 
 
 # ------------------------------------------------------------------- workouts
@@ -222,6 +230,20 @@ def _workout_active(hass, model, msg):
 @command("workout/update", {vol.Required("workout"): dict})
 def _workout_update(hass, model, msg):
     return model.update_active_workout(msg["workout"])
+
+
+@command("rest/set", {
+    vol.Required("ends_at"): vol.Any(None, vol.Coerce(float)),
+    vol.Optional("total"): vol.Any(None, int),
+    vol.Optional("exercise_id"): vol.Any(None, str),
+})
+def _rest_set(hass, model, msg):
+    return model.set_rest(msg["ends_at"], msg.get("total"), msg.get("exercise_id"))
+
+
+@command("notify/targets")
+def _notify_targets(hass, model, msg):
+    return notify_targets(hass)
 
 
 @command("workout/finish")

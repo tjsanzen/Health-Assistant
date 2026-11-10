@@ -98,6 +98,62 @@ async def test_setup_flow_and_panel(hass: HomeAssistant, hass_ws_client) -> None
     assert "health" not in hass.data["frontend_panels"]
 
 
+async def test_live_activity_rest_timer(hass: HomeAssistant, hass_ws_client) -> None:
+    """Workout start/rest/finish drive a Live Activity through the companion notify service."""
+    import time
+    from homeassistant.core import ServiceCall
+    from pytest_homeassistant_custom_component.common import async_fire_time_changed
+    from homeassistant.util import dt as dt_util
+    from datetime import timedelta
+
+    calls: list[dict] = []
+
+    async def _notify(call: ServiceCall) -> None:
+        calls.append(dict(call.data))
+
+    hass.services.async_register("notify", "mobile_app_test_iphone", _notify)
+    assert await async_setup_component(hass, "http", {})
+    await _create_profile(hass)
+    ws = await hass_ws_client(hass)
+
+    await ws.send_json({"id": 1, "type": f"{DOMAIN}/notify/targets"})
+    assert (await ws.receive_json())["result"] == ["mobile_app_test_iphone"]
+    await ws.send_json({"id": 2, "type": f"{DOMAIN}/profile/update",
+                        "changes": {"live_activity_notify": "mobile_app_test_iphone", "calorie_target_override": 1900}})
+    msg = await ws.receive_json()
+    assert msg["success"] and msg["result"]["energy"]["target"] == 1900
+
+    await ws.send_json({"id": 3, "type": f"{DOMAIN}/workout/start"})
+    assert (await ws.receive_json())["success"]
+    await hass.async_block_till_done()
+    assert calls[-1]["data"]["live_update"] and calls[-1]["data"]["chronometer"]
+    assert calls[-1]["data"]["tag"] == "health_assistant_workout"
+
+    ends = time.time() + 90
+    await ws.send_json({"id": 4, "type": f"{DOMAIN}/rest/set", "ends_at": ends, "total": 90, "exercise_id": "squat"})
+    assert (await ws.receive_json())["success"]
+    await hass.async_block_till_done()
+    assert calls[-1]["data"]["when"] == int(ends) and calls[-1]["message"] == "Rest · next: Squat"
+
+    # When the rest runs out, HA flips the activity back to the workout clock (with an alert).
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=95))
+    await hass.async_block_till_done()
+    assert calls[-1]["message"].startswith("Rest over") and calls[-1]["data"]["silent"] is False
+
+    await ws.send_json({"id": 5, "type": f"{DOMAIN}/workout/discard"})
+    assert (await ws.receive_json())["success"]
+    await hass.async_block_till_done()
+    assert calls[-1]["message"] == "clear_notification"
+
+    await ws.send_json({"id": 6, "type": f"{DOMAIN}/food/stats"})
+    msg = await ws.receive_json()
+    assert msg["success"] and len(msg["result"]["series"]) == 14
+
+    await ws.send_json({"id": 7, "type": f"{DOMAIN}/exercises/list"})
+    msg = await ws.receive_json()
+    assert any(e["id"] == "lateral_raise_cable" for e in msg["result"])
+
+
 async def test_mifflin_without_body_fat(hass: HomeAssistant) -> None:
     assert await async_setup_component(hass, "http", {})
     _, ph = await _create_profile(hass)

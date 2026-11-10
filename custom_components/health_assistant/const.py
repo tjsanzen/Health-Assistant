@@ -3,7 +3,7 @@ from __future__ import annotations
 
 DOMAIN = "health_assistant"
 NAME = "Health Assistant"
-VERSION = "0.1.0"
+VERSION = "0.2.0"
 
 STORAGE_VERSION = 1
 STORAGE_KEY = "health_assistant.{entry_id}"

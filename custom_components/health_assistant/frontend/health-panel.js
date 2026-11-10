@@ -7,13 +7,26 @@ const LB = 2.2046226218;
 const OZ_G = 28.349523125;
 const MI_M = 1609.344;
 const MEALS = ["breakfast", "lunch", "dinner", "snack"];
-const SET_TYPES = ["working", "warmup", "failure", "drop"];
 const TABS = [
-  { id: "history", label: "History", icon: "mdi:history" },
-  { id: "workout", label: "Start Workout", icon: "mdi:plus" },
-  { id: "nutrition", label: "Nutrition", icon: "mdi:silverware-fork-knife" },
-  { id: "profile", label: "Profile", icon: "mdi:account-circle" },
+  { id: "history", label: "History", icon: "mdi:history", title: "History" },
+  { id: "workout", label: "Start Workout", icon: "mdi:plus", title: "Workout" },
+  { id: "nutrition", label: "Nutrition", icon: "mdi:silverware-fork-knife", title: "Nutrition" },
+  { id: "profile", label: "Profile", icon: "mdi:account-circle", title: "Profile" },
 ];
+const SET_TYPES = {
+  working: { label: "Working set", short: null, cls: "work" },
+  warmup: { label: "Warm-up", short: "W", cls: "warm" },
+  drop: { label: "Drop set", short: "D", cls: "drop" },
+  failure: { label: "Failure", short: "F", cls: "fail" },
+};
+const EFFORT = [
+  [10, "Maximum effort", "Couldn't have done another rep"],
+  [9, "Very hard", "Could have done 1 more rep"],
+  [8, "Hard", "Could have done 2 more reps"],
+  [7, "Moderate", "Could have done 3 more reps"],
+  [6, "Easy", "No real effort — 4+ reps left"],
+];
+const REST_OPTIONS = [0, 30, 45, 60, 90, 120, 150, 180, 240, 300];
 const VITALS = {
   weight: { label: "Weight", icon: "mdi:scale-bathroom" },
   body_fat: { label: "Body fat", icon: "mdi:percent", unit: "%" },
@@ -37,17 +50,21 @@ const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
 const pad = (n) => String(n).padStart(2, "0");
 const localDate = (d = new Date()) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 const addDays = (iso, n) => { const d = new Date(iso + "T12:00:00"); d.setDate(d.getDate() + n); return localDate(d); };
-const fmtDur = (s) => { if (s == null) return "–"; s = Math.max(0, Math.floor(s)); const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), x = s % 60; return h ? `${h}:${pad(m)}:${pad(x)}` : `${m}:${pad(x)}`; };
+const fmtDur = (s) => { if (s == null) return "–"; s = Math.max(0, Math.round(s)); const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), x = s % 60; return h ? `${h}:${pad(m)}:${pad(x)}` : `${m}:${pad(x)}`; };
+const fmtRest = (s) => (!s ? "Off" : s % 60 ? fmtDur(s) : `${s / 60} min`);
 const fmtDate = (iso, opts = { weekday: "short", month: "short", day: "numeric" }) => new Date(iso).toLocaleDateString(undefined, opts);
 const fmtTime = (iso) => new Date(iso).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
 const num = (v) => (v === "" || v == null ? null : Number(v));
 const toLocalInput = (d = new Date()) => `${localDate(d)}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 const icon = (name, cls = "") => `<ha-icon class="${cls}" icon="${name}"></ha-icon>`;
+const now = () => Date.now() / 1000;
+const rid = () => Math.random().toString(16).slice(2, 14);
 
 class Units {
   constructor(system) { this.imp = system === "imperial"; }
   get w() { return this.imp ? "lb" : "kg"; }
-  wOut(kg, digits = 1) { if (kg == null) return null; const v = this.imp ? kg * LB : kg; const f = 10 ** digits; return Math.round(v * f) / f; }
+  get wCol() { return this.imp ? "lbs" : "kg"; }
+  wOut(kg, digits = 1) { if (kg == null || isNaN(kg)) return null; const v = this.imp ? kg * LB : kg; const f = 10 ** digits; return Math.round(v * f) / f; }
   wIn(v) { return v == null || v === "" ? null : (this.imp ? Number(v) / LB : Number(v)); }
   h(cm) { if (cm == null) return "–"; if (!this.imp) return `${r0(cm)} cm`; const t = cm / 2.54; let ft = Math.floor(t / 12), inch = Math.round(t - ft * 12); if (inch === 12) { ft++; inch = 0; } return `${ft}′ ${inch}″`; }
   get d() { return this.imp ? "mi" : "km"; }
@@ -82,7 +99,21 @@ function servingLabel(food) {
   if (!parts.length) return food.per_100g ? "100 g" : "serving";
   return parts.join(" · ");
 }
-function perServingKcal(food) { return portion(food, 1, "serving").kcal; }
+
+/* Last time's set of the same kind: nth warm-up ↔ nth warm-up, nth work set ↔ nth work set. */
+function prevFor(last, sets, i) {
+  const list = last?.sets;
+  if (!list || !list.length) return null;
+  const warm = (x) => x.type === "warmup";
+  const isWarm = warm(sets[i]);
+  const n = sets.slice(0, i).filter((x) => warm(x) === isWarm).length;
+  return list.filter((x) => warm(x) === isWarm)[n] || null;
+}
+const prCount = (w) => new Set((w.prs || []).map((p) => p.exercise_id)).size;
+function blankSet(type = "working", prev) {
+  return { id: rid(), type, weight: prev?.weight ?? null, reps: prev?.reps ?? null, rpe: null,
+    duration_s: prev?.duration_s ?? null, distance_m: prev?.distance_m ?? null, completed: false };
+}
 
 /* ================================================================== panel */
 class HealthAssistantPanel extends HTMLElement {
@@ -94,10 +125,9 @@ class HealthAssistantPanel extends HTMLElement {
       profiles: [], profileId: null, overview: null, loading: true, error: null,
       historyMode: "workouts", workouts: null, workoutsTotal: 0, records: null,
       templates: null, exercises: [], active: null, last: {},
-      day: localDate(), food: null, vitals: {}, sheets: [], rest: null,
+      day: localDate(), food: null, stats: null, vitals: {}, sheets: [],
     };
     this._saveTimer = null;
-    this._tick = null;
   }
 
   set hass(h) { const first = !this._hass; this._hass = h; if (first) this._boot(); }
@@ -137,7 +167,7 @@ class HealthAssistantPanel extends HTMLElement {
       this._s.error = e.message || String(e);
     }
     this._s.loading = false;
-    this._renderShell();
+    this._render();
   }
 
   async _loadAll() {
@@ -161,25 +191,39 @@ class HealthAssistantPanel extends HTMLElement {
       }
       if (s.historyMode === "records" && !s.records) s.records = await this.ws("records");
     }
-    if (s.tab === "nutrition") s.food = await this.ws("food/day", { date: s.day });
+    if (s.tab === "nutrition") {
+      [s.food, s.stats] = await Promise.all([this.ws("food/day", { date: s.day }), this.ws("food/stats")]);
+    }
     if (s.tab === "profile") {
       const [overview, weights] = await Promise.all([this.ws("overview", { date: localDate() }), this.ws("vitals/list", { vital_type: "weight", limit: 365 })]);
       s.overview = overview; s.vitals.weight = weights;
     }
   }
 
+  async _reloadFood() {
+    [this._s.food, this._s.stats] = await Promise.all([this.ws("food/day", { date: this._s.day }), this.ws("food/stats")]);
+  }
   async _refreshOverview() { this._s.overview = await this.ws("overview", { date: localDate() }); }
-  async _refreshActive() { try { const a = await this.ws("workout/active"); if (JSON.stringify(a) !== JSON.stringify(this._s.active) && !this._saveTimer) { this._s.active = a; if (this._s.tab === "workout") this._render(); } } catch (_) { /* ignore */ } }
+  async _refreshActive() {
+    try {
+      const a = await this.ws("workout/active");
+      if (!this._saveTimer && JSON.stringify(a) !== JSON.stringify(this._s.active)) {
+        this._s.active = a;
+        if (a) await this._loadLast(a.exercises.map((e) => e.exercise_id));
+        if (this._s.tab === "workout") this._render(); else this._renderNav();
+      }
+    } catch (_) { /* offline: keep local state */ }
+  }
 
   async _loadLast(ids) {
-    const need = ids.filter((id) => !(id in this._s.last));
+    const need = [...new Set(ids)].filter((id) => !(id in this._s.last));
     if (!need.length) return;
     Object.assign(this._s.last, await this.ws("exercises/last", { exercise_ids: need }));
   }
 
   _queueWorkoutSave() {
     clearTimeout(this._saveTimer);
-    this._saveTimer = setTimeout(() => this._flushWorkout(), 700);
+    this._saveTimer = setTimeout(() => this._flushWorkout(), 600);
   }
   async _flushWorkout() {
     if (!this._saveTimer) return;
@@ -194,7 +238,6 @@ class HealthAssistantPanel extends HTMLElement {
     root.innerHTML = `<style>${STYLES}</style>
       <div class="app ${this._narrow ? "narrow" : "wide"}">
         <header class="top">
-          ${this._narrow ? `<button class="iconbtn" data-action="menu" aria-label="Menu">${icon("mdi:menu")}</button>` : ""}
           <div class="title">${icon("mdi:food-apple", "brand")}<span>Health</span></div>
           <nav class="topnav" id="topnav"></nav>
           <div class="spacer"></div>
@@ -211,31 +254,53 @@ class HealthAssistantPanel extends HTMLElement {
       root.addEventListener("input", (e) => this._onInput(e));
       root.addEventListener("change", (e) => this._onChange(e));
       root.addEventListener("keydown", (e) => { if (e.key === "Enter" && e.target.dataset.enter) { e.preventDefault(); this._act(e.target.dataset.enter, e.target, e); } });
+      root.addEventListener("touchstart", (e) => this._dragStart(e), { passive: true });
+      root.addEventListener("touchmove", (e) => this._dragMove(e), { passive: false });
+      root.addEventListener("touchend", () => this._dragEnd());
       this._wired = true;
     }
     this._render();
   }
 
+  _profileSelect() {
+    return this._s.profiles.length > 1
+      ? `<select class="profilesel" data-change="profile" aria-label="Profile">${this._s.profiles.map((p) => `<option value="${p.id}" ${p.id === this._s.profileId ? "selected" : ""}>${esc(p.name)}</option>`).join("")}</select>` : "";
+  }
+
+  _renderNav() {
+    const root = this.shadowRoot;
+    const s = this._s;
+    const btn = (t) => {
+      const on = s.tab === t.id;
+      const isW = t.id === "workout";
+      const label = isW && s.active ? `<span data-elapsed>${fmtDur(this._elapsed())}</span>` : t.label;
+      return `<button class="navbtn ${on ? "on" : ""} ${isW ? "center" : ""}" data-action="tab" data-tab="${t.id}">
+        <span class="navicon">${icon(isW && s.active ? "mdi:dumbbell" : t.icon)}</span><span class="navlabel">${label}</span></button>`;
+    };
+    const [hist, work, nut, prof] = TABS;
+    root.getElementById("bottomnav").innerHTML =
+      `<button class="navbtn" data-action="menu" aria-label="Home Assistant menu"><span class="navicon">${icon("mdi:menu")}</span><span class="navlabel">Menu</span></button>` +
+      btn(hist) + btn(work) + btn(nut) + btn(prof);
+    root.getElementById("topnav").innerHTML = TABS.map((t) => btn(t)).join("");
+    root.getElementById("profilepick").innerHTML = this._profileSelect();
+  }
+
   _render() {
     const root = this.shadowRoot;
-    if (!root.getElementById("content")) return;
-    const navHtml = TABS.map((t) => {
-      const active = this._s.tab === t.id;
-      const isWorkout = t.id === "workout";
-      const label = isWorkout && this._s.active ? `<span data-elapsed>${fmtDur(this._elapsed())}</span>` : t.label;
-      return `<button class="navbtn ${active ? "on" : ""} ${isWorkout ? "center" : ""}" data-action="tab" data-tab="${t.id}">
-        <span class="navicon">${icon(isWorkout && this._s.active ? "mdi:dumbbell" : t.icon)}</span><span class="navlabel">${label}</span></button>`;
-    }).join("");
-    root.getElementById("bottomnav").innerHTML = navHtml;
-    root.getElementById("topnav").innerHTML = navHtml;
-    root.getElementById("profilepick").innerHTML = this._s.profiles.length > 1
-      ? `<select class="profilesel" data-change="profile">${this._s.profiles.map((p) => `<option value="${p.id}" ${p.id === this._s.profileId ? "selected" : ""}>${esc(p.name)}</option>`).join("")}</select>` : "";
     const content = root.getElementById("content");
+    if (!content) return;
+    this._renderNav();
     const scroll = content.scrollTop;
-    content.innerHTML = `<div class="wrap">${this._view()}</div>`;
+    const wide = !this._narrow && this._s.tab === "nutrition";
+    content.innerHTML = `<div class="wrap ${wide ? "widewrap" : ""}">${this._view()}</div>`;
     content.scrollTop = scroll;
     this._renderSheet();
     this._renderRest();
+  }
+
+  _head(title, right = "") {
+    // Large iOS-style title; only shown on phones (desktop has the header bar).
+    return `<div class="pagehead"><h1>${esc(title)}</h1><div class="row">${right}</div></div>`;
   }
 
   _view() {
@@ -258,19 +323,21 @@ class HealthAssistantPanel extends HTMLElement {
     const seg = `<div class="seg">
       <button class="${s.historyMode === "workouts" ? "on" : ""}" data-action="historyMode" data-mode="workouts">Workouts</button>
       <button class="${s.historyMode === "records" ? "on" : ""}" data-action="historyMode" data-mode="records">Records</button></div>`;
-    if (s.historyMode === "records") return seg + this._viewRecords();
-    if (!s.workouts) return seg + `<div class="empty">Loading…</div>`;
-    if (!s.workouts.length) return seg + `<div class="card empty">${icon("mdi:dumbbell", "bigicon")}<h2>No workouts yet</h2><p>Finished workouts show up here.</p><button class="btn primary" data-action="tab" data-tab="workout">Start a workout</button></div>`;
+    const head = this._head("History") + seg;
+    if (s.historyMode === "records") return head + this._viewRecords();
+    if (!s.workouts) return head + `<div class="empty">Loading…</div>`;
+    if (!s.workouts.length) return head + `<div class="card empty">${icon("mdi:dumbbell", "bigicon")}<h2>No workouts yet</h2><p>Finished workouts show up here.</p><button class="btn primary" data-action="tab" data-tab="workout">Start a workout</button></div>`;
     let month = "";
     const items = s.workouts.map((w) => {
       const m = fmtDate(w.started_at, { month: "long", year: "numeric" });
-      const head = m !== month ? `<h3 class="month">${m}</h3>` : "";
+      const mh = m !== month ? `<h3 class="month">${m}</h3>` : "";
       month = m;
       const sm = w.summary || {};
       const lines = w.exercises.slice(0, 4).map((e) => `<div class="exline"><span>${e.sets.length} × ${esc(this._exName(e.exercise_id))}</span><span class="muted">${this._bestSetText(e)}</span></div>`).join("");
       const more = w.exercises.length > 4 ? `<div class="muted small">+${w.exercises.length - 4} more</div>` : "";
-      return `${head}<button class="card workout" data-action="openWorkout" data-id="${w.id}">
-        <div class="row between"><b>${esc(w.name)}</b>${prCount(w) ? `<span class="badge gold">${icon("mdi:trophy")} ${prCount(w)} PR${prCount(w) > 1 ? "s" : ""}</span>` : ""}</div>
+      const pc = prCount(w);
+      return `${mh}<button class="card workout" data-action="openWorkout" data-id="${w.id}">
+        <div class="row between"><b>${esc(w.name)}</b>${pc ? `<span class="badge gold">${icon("mdi:trophy")} ${pc} PR${pc > 1 ? "s" : ""}</span>` : ""}</div>
         <div class="muted small">${fmtDate(w.started_at)} · ${fmtTime(w.started_at)}</div>
         <div class="stats">
           <span>${icon("mdi:timer-outline")} ${fmtDur(sm.duration_s)}</span>
@@ -279,7 +346,7 @@ class HealthAssistantPanel extends HTMLElement {
         </div>${lines}${more}</button>`;
     }).join("");
     const loadMore = s.workouts.length < s.workoutsTotal ? `<button class="btn ghost full" data-action="moreWorkouts">Load more</button>` : "";
-    return seg + items + loadMore;
+    return head + items + loadMore;
   }
 
   _bestSetText(ex) {
@@ -288,7 +355,8 @@ class HealthAssistantPanel extends HTMLElement {
     if (!counted.length) return "";
     if (kind === "duration") return fmtDur(Math.max(...counted.map((x) => x.duration_s || 0)));
     if (kind === "distance") return `${r1(this._units.dOut(Math.max(...counted.map((x) => x.distance_m || 0))))} ${this._units.d}`;
-    const best = counted.reduce((a, b) => ((b.weight || 0) * (1 + (b.reps || 0) / 30) > (a.weight || 0) * (1 + (a.reps || 0) / 30) ? b : a));
+    const score = (x) => (x.weight || 0) * (1 + (x.reps || 0) / 30);
+    const best = counted.reduce((a, b) => (score(b) > score(a) ? b : a));
     return best.weight ? `${r1(this._units.wOut(best.weight))} ${this._units.w} × ${best.reps ?? "–"}` : `${best.reps ?? "–"} reps`;
   }
 
@@ -324,9 +392,9 @@ class HealthAssistantPanel extends HTMLElement {
       let n = 0;
       const rows = e.sets.map((x) => {
         if (x.type === "working") n++;
-        return `<tr><td>${this._setBadge(x.type, n)}</td><td>${this._setText(e.exercise_id, x)}</td><td class="muted">${x.rpe ? `RPE ${x.rpe}` : ""}</td></tr>`;
+        return `<tr><td>${this._setBadge(x.type, n)}</td><td>${this._setText(e.exercise_id, x)}</td><td class="muted right">${x.rpe ? `Effort ${x.rpe}` : ""}</td></tr>`;
       }).join("");
-      return `<div class="detailex"><b>${esc(this._exName(e.exercise_id))}</b>${e.notes ? `<div class="muted small">${esc(e.notes)}</div>` : ""}<table class="settable">${rows}</table></div>`;
+      return `<div class="detailex"><b>${esc(this._exName(e.exercise_id))}</b><table class="settable">${rows}</table></div>`;
     }).join("");
     return `<h2>${esc(w.name)}</h2>
       <div class="muted">${fmtDate(w.started_at, { weekday: "long", month: "long", day: "numeric", year: "numeric" })} · ${fmtTime(w.started_at)}</div>
@@ -351,24 +419,29 @@ class HealthAssistantPanel extends HTMLElement {
 
   _prevText(kind, x) {
     const u = this._units;
+    if (!x) return "–";
     if (kind === "duration") return fmtDur(x.duration_s);
     if (kind === "distance") return `${r1(u.dOut(x.distance_m))} ${u.d}`;
-    if (kind === "bodyweight_reps") return `${x.weight ? `+${r1(u.wOut(x.weight))}×` : ""}${x.reps ?? "–"}`;
-    return `${r1(u.wOut(x.weight))}×${x.reps ?? "–"}`;
+    if (kind === "bodyweight_reps") return `${x.weight ? `+${r1(u.wOut(x.weight))} × ` : ""}${x.reps ?? "–"}`;
+    if (x.weight == null && x.reps == null) return "–";
+    return `${r1(u.wOut(x.weight))} × ${x.reps ?? "–"}`;
   }
 
   _setBadge(type, n) {
-    const map = { warmup: ["W", "warm"], failure: ["F", "fail"], drop: ["D", "drop"] };
-    const [t, c] = map[type] || [String(n), "work"];
-    return `<span class="setbadge ${c}">${t}</span>`;
+    const t = SET_TYPES[type] || SET_TYPES.working;
+    return `<span class="setbadge ${t.cls}">${t.short || n}</span>`;
   }
 
-  async _sheetExercise(id) {
-    const ex = this._exMap[id];
+  async _sheetExerciseHtml(id) {
+    const ex = this._exMap[id] || { name: id };
     const hist = await this.ws("exercises/history", { exercise_id: id });
     const pts = hist.filter((h) => h.best_e1rm).map((h) => ({ x: new Date(h.date).getTime(), y: this._units.wOut(h.best_e1rm) })).reverse();
     const rows = hist.slice(0, 15).map((h) => `<div class="histrow"><div class="muted small">${fmtDate(h.date)}</div><div>${h.sets.filter((x) => x.type !== "warmup").map((x) => this._setText(id, x)).join(", ")}</div></div>`).join("");
-    return `<h2>${esc(ex?.name || id)}</h2><div class="muted">${esc(ex?.muscle || "")} · ${esc(ex?.equipment || "")}</div>
+    const muscles = [ex.muscle, ...(ex.secondary || [])].filter(Boolean).join(", ");
+    return `<h2>${esc(ex.name)}</h2><div class="muted">${esc(muscles)}${ex.equipment ? ` · ${esc(ex.equipment)}` : ""}</div>
+      ${ex.demo_url ? `<img class="demo" src="${esc(ex.demo_url)}" alt="${esc(ex.name)} demonstration" loading="lazy">` : ""}
+      ${ex.instructions?.length ? `<h3>How to</h3><ol class="steps">${ex.instructions.map((i) => `<li>${esc(i)}</li>`).join("")}</ol>` : ""}
+      ${ex.tips?.length ? `<h3>Tips</h3><ul class="steps">${ex.tips.map((i) => `<li>${esc(i)}</li>`).join("")}</ul>` : ""}
       ${pts.length > 1 ? `<h3>Estimated 1RM (${this._units.w})</h3>${lineChart(pts)}` : ""}
       <h3>History</h3>${rows || `<p class="muted">No sets logged yet.</p>`}`;
   }
@@ -383,7 +456,7 @@ class HealthAssistantPanel extends HTMLElement {
           <button class="iconbtn sm" data-action="deleteTemplate" data-id="${t.id}" aria-label="Delete">${icon("mdi:delete-outline")}</button></div></div>
         <div class="muted small">${t.exercises.map((e) => `${e.sets.length} × ${esc(this._exName(e.exercise_id))}`).join(" · ") || "No exercises"}</div>
         <button class="btn primary full" data-action="startWorkout" data-template="${t.id}">${icon("mdi:play")} Start</button></div>`).join("");
-    return `<div class="card hero">
+    return this._head("Workout") + `<div class="card hero">
         ${icon("mdi:dumbbell", "bigicon")}
         <h2>Ready to train?</h2>
         <button class="btn primary big full" data-action="startWorkout">${icon("mdi:plus")} Start empty workout</button>
@@ -392,44 +465,53 @@ class HealthAssistantPanel extends HTMLElement {
       ${tpls || `<div class="card empty small"><p>Save a workout as a template, or create one to start faster next time.</p></div>`}`;
   }
 
+  _supersetLabels() {
+    const map = {};
+    let i = 0;
+    for (const e of this._s.active.exercises) if (e.superset && !(e.superset in map)) map[e.superset] = String.fromCharCode(65 + i++);
+    return map;
+  }
+
   _viewActive() {
     const w = this._s.active;
     const u = this._units;
+    const ssl = this._supersetLabels();
     const exs = w.exercises.map((e, ei) => {
       const ex = this._exMap[e.exercise_id] || { name: e.exercise_id, kind: "weight_reps" };
-      const last = this._s.last[e.exercise_id] || [];
+      const last = this._s.last[e.exercise_id];
       const kind = ex.kind;
-      const head = kind === "duration" ? ["Time (s)"] : kind === "distance" ? [u.d, "Min"] : kind === "bodyweight_reps" ? [`+${u.w}`, "Reps"] : [u.w, "Reps"];
+      const cols = kind === "duration" ? ["Time"] : kind === "distance" ? [u.d, "Min"] : kind === "bodyweight_reps" ? [`+${u.wCol}`, "Reps"] : [u.wCol, "Reps"];
       let n = 0;
       const rows = e.sets.map((x, si) => {
         if (x.type === "working") n++;
         const prev = prevFor(last, e.sets, si);
-        const prevTxt = prev ? this._prevText(kind, prev) : "–";
+        const ph = (v) => (v == null ? "" : v);
         let inputs;
-        if (kind === "duration") inputs = `<input class="cell" inputmode="numeric" data-set="duration_s" data-e="${ei}" data-s="${si}" value="${x.duration_s ?? ""}" placeholder="${prev?.duration_s ?? ""}">`;
-        else if (kind === "distance") inputs = `<input class="cell" inputmode="decimal" data-set="distance" data-e="${ei}" data-s="${si}" value="${x.distance_m != null ? u.dOut(x.distance_m) : ""}" placeholder="${prev?.distance_m != null ? u.dOut(prev.distance_m) : ""}">
-            <input class="cell" inputmode="decimal" data-set="minutes" data-e="${ei}" data-s="${si}" value="${x.duration_s != null ? r1(x.duration_s / 60) : ""}">`;
-        else inputs = `<input class="cell" inputmode="decimal" data-set="weight" data-e="${ei}" data-s="${si}" value="${x.weight != null ? u.wOut(x.weight) : ""}" placeholder="${prev?.weight != null ? u.wOut(prev.weight) : ""}">
-            <input class="cell" inputmode="numeric" data-set="reps" data-e="${ei}" data-s="${si}" value="${x.reps ?? ""}" placeholder="${prev?.reps ?? ""}">`;
-        const rpe = `<select class="cell rpe" data-set="rpe" data-e="${ei}" data-s="${si}"><option value="">–</option>${[6, 6.5, 7, 7.5, 8, 8.5, 9, 9.5, 10].map((v) => `<option ${x.rpe == v ? "selected" : ""}>${v}</option>`).join("")}</select>`;
+        if (kind === "duration") inputs = `<input class="cell wide" inputmode="numeric" data-set="duration_s" data-e="${ei}" data-s="${si}" value="${ph(x.duration_s)}" placeholder="${ph(prev?.duration_s)}" aria-label="Seconds">`;
+        else if (kind === "distance") inputs = `<input class="cell" inputmode="decimal" data-set="distance" data-e="${ei}" data-s="${si}" value="${x.distance_m != null ? u.dOut(x.distance_m) : ""}" placeholder="${prev?.distance_m != null ? u.dOut(prev.distance_m) : ""}" aria-label="Distance">
+            <input class="cell" inputmode="decimal" data-set="minutes" data-e="${ei}" data-s="${si}" value="${x.duration_s != null ? r1(x.duration_s / 60) : ""}" aria-label="Minutes">`;
+        else inputs = `<input class="cell" inputmode="decimal" data-set="weight" data-e="${ei}" data-s="${si}" value="${x.weight != null ? u.wOut(x.weight) : ""}" placeholder="${prev?.weight != null ? u.wOut(prev.weight) : ""}" aria-label="${u.wCol}">
+            <input class="cell" inputmode="numeric" data-set="reps" data-e="${ei}" data-s="${si}" value="${ph(x.reps)}" placeholder="${ph(prev?.reps)}" aria-label="Reps">`;
         return `<div class="setrow ${x.completed ? "done" : ""} k-${kind}">
-          <button class="setbtn" data-action="cycleType" data-e="${ei}" data-s="${si}" aria-label="Set type">${this._setBadge(x.type, n)}</button>
-          <button class="prev" data-action="usePrev" data-e="${ei}" data-s="${si}">${esc(prevTxt)}</button>
-          ${inputs}${rpe}
-          <button class="check ${x.completed ? "on" : ""}" data-action="toggleSet" data-e="${ei}" data-s="${si}" aria-label="Complete set">${icon("mdi:check")}</button>
-          <button class="iconbtn xs del" data-action="removeSet" data-e="${ei}" data-s="${si}" aria-label="Remove set">${icon("mdi:close")}</button>
+          <button class="setbtn" data-action="setMenu" data-e="${ei}" data-s="${si}" aria-label="Set type">${this._setBadge(x.type, n)}</button>
+          <button class="prev" data-action="usePrev" data-e="${ei}" data-s="${si}">${esc(this._prevText(kind, prev))}</button>
+          ${inputs}
+          <button class="check ${x.completed ? "on" : ""}" data-action="toggleSet" data-e="${ei}" data-s="${si}" aria-label="Complete set">${icon("mdi:check")}${x.completed && x.rpe ? `<span class="rpe">${x.rpe}</span>` : ""}</button>
         </div>`;
       }).join("");
-      return `<div class="card exercise">
-        <div class="row between"><button class="linklike" data-action="openExercise" data-id="${e.exercise_id}"><b>${esc(ex.name)}</b></button>
-          <button class="iconbtn sm" data-action="removeExercise" data-e="${ei}" aria-label="Remove exercise">${icon("mdi:delete-outline")}</button></div>
-        <input class="note" placeholder="Notes" data-exnote="${ei}" value="${esc(e.notes || "")}">
-        <div class="sethead k-${kind}"><span>Set</span><span>Previous</span>${head.map((h) => `<span>${h}</span>`).join("")}<span>RPE</span><span></span><span></span></div>
+      const ss = e.superset ? `<span class="sstag">Superset ${ssl[e.superset]}</span>` : "";
+      return `<div class="card exercise ${e.superset ? `ss ss${(ssl[e.superset].charCodeAt(0) - 65) % 4}` : ""}">
+        <div class="exhead">
+          <button class="extitle" data-action="openExercise" data-id="${e.exercise_id}">${esc(ex.name)}</button>
+          <button class="iconbtn" data-action="exMenu" data-e="${ei}" aria-label="Exercise options">${icon("mdi:dots-horizontal")}</button>
+        </div>
+        <div class="exmeta">${ss}<span>${icon("mdi:timer-outline")} ${fmtRest(e.rest_s ?? 120)}</span></div>
+        <div class="sethead k-${kind}"><span>Set</span><span>Previous</span>${cols.map((h) => `<span>${h}</span>`).join("")}<span>${icon("mdi:check")}</span></div>
         ${rows}
-        <button class="btn ghost full" data-action="addSet" data-e="${ei}">${icon("mdi:plus")} Add set</button>
+        <button class="btn soft full" data-action="addSet" data-e="${ei}">${icon("mdi:plus")} Add set</button>
       </div>`;
     }).join("");
-    return `<div class="card activehead">
+    return `<div class="activehead">
         <input class="wname" data-wfield="name" value="${esc(w.name)}" aria-label="Workout name">
         <div class="row between"><span class="timer">${icon("mdi:timer-outline")} <span data-elapsed>${fmtDur(this._elapsed())}</span></span>
           <button class="btn primary" data-action="finishWorkout">Finish</button></div>
@@ -440,14 +522,14 @@ class HealthAssistantPanel extends HTMLElement {
       <button class="btn danger ghost full" data-action="discardWorkout">Discard workout</button>`;
   }
 
-  _elapsed() { const a = this._s.active; return a ? (Date.now() - new Date(a.started_at).getTime()) / 1000 : 0; }
+  _elapsed() { const a = this._s.active; return a ? now() - new Date(a.started_at).getTime() / 1000 : 0; }
 
   _onTick() {
     if (this._s.active) this.shadowRoot.querySelectorAll("[data-elapsed]").forEach((el) => (el.textContent = fmtDur(this._elapsed())));
-    if (this._s.rest) {
-      const left = (this._s.rest.endsAt - Date.now()) / 1000;
-      if (left <= 0) { this._s.rest = null; this._buzz(); }
-      this._renderRest();
+    const rest = this._s.active?.rest;
+    if (rest) {
+      if (rest.ends_at <= now()) { this._setRest(null, true); this._buzz(); }
+      else this._renderRest();
     }
   }
   _buzz() { try { navigator.vibrate?.([200, 100, 200]); } catch (_) { /* iOS has no vibrate */ } this._toast("Rest over — next set!"); }
@@ -455,25 +537,42 @@ class HealthAssistantPanel extends HTMLElement {
   _renderRest() {
     const el = this.shadowRoot.getElementById("rest");
     if (!el) return;
-    const r = this._s.rest;
+    const r = this._s.active?.rest;
     if (!r) { el.innerHTML = ""; return; }
-    const left = Math.max(0, (r.endsAt - Date.now()) / 1000);
-    const pct = Math.min(100, (left / r.total) * 100);
+    const left = Math.max(0, r.ends_at - now());
+    const pct = Math.min(100, (left / (r.total || 1)) * 100);
+    const bar = el.querySelector(".restbar");
+    if (bar) { // update in place so buttons don't flicker
+      bar.querySelector(".restfill").style.width = `${pct}%`;
+      bar.querySelector("[data-restleft]").textContent = fmtDur(left);
+      return;
+    }
     el.innerHTML = `<div class="restbar"><div class="restfill" style="width:${pct}%"></div>
-      <span>${icon("mdi:timer-sand")} Rest ${fmtDur(left)}</span>
-      <div class="row"><button class="btn sm" data-action="restAdj" data-d="-15">−15</button><button class="btn sm" data-action="restAdj" data-d="15">+15</button><button class="btn sm" data-action="restSkip">Skip</button></div></div>`;
+      <span class="restlabel">${icon("mdi:timer-sand")} Rest <b data-restleft>${fmtDur(left)}</b></span>
+      <div class="row"><button class="btn sm" data-action="restAdj" data-d="-15">−15</button><button class="btn sm" data-action="restAdj" data-d="15">+15</button><button class="btn sm primary" data-action="restSkip">Skip</button></div></div>`;
+  }
+
+  /** Start/adjust/clear the rest timer locally and tell HA (which drives the iPhone Live Activity). */
+  async _setRest(rest, quiet = false) {
+    const a = this._s.active;
+    if (!a) return;
+    a.rest = rest;
+    this.shadowRoot.getElementById("rest").innerHTML = "";
+    this._renderRest();
+    try {
+      await this.ws("rest/set", rest ? { ends_at: rest.ends_at, total: rest.total, exercise_id: rest.exercise_id } : { ends_at: null });
+    } catch (e) { if (!quiet) this._toast(e.message, true); }
   }
 
   /* ========================================================== NUTRITION */
   _viewNutrition() {
     const s = this._s;
     const f = s.food;
-    if (!f) return `<div class="empty">Loading…</div>`;
+    if (!f) return this._head("Nutrition") + `<div class="empty">Loading…</div>`;
     const today = localDate();
     const dayLabel = s.day === today ? "Today" : s.day === addDays(today, -1) ? "Yesterday" : fmtDate(s.day + "T12:00:00");
     const t = f.totals, mt = f.macro_targets || {};
     const target = f.target || 0;
-    const ring = ringChart(t.kcal, target);
     const macro = (k, label, cls) => {
       const goal = mt[k] || 0, val = t[k] || 0;
       return `<div class="macro"><div class="row between small"><span>${label}</span><span class="muted">${r0(val)} / ${r0(goal)} g</span></div>
@@ -489,11 +588,11 @@ class HealthAssistantPanel extends HTMLElement {
           <span class="kcal">${r0(e.kcal)}</span></button>`).join("")}
         <button class="btn ghost full" data-action="addFood" data-meal="${m}">${icon("mdi:plus")} Add food</button></div>`;
     }).join("");
-    return `<div class="datenav"><button class="iconbtn" data-action="day" data-d="-1" aria-label="Previous day">${icon("mdi:chevron-left")}</button>
+    const left = `<div class="datenav"><button class="iconbtn" data-action="day" data-d="-1" aria-label="Previous day">${icon("mdi:chevron-left")}</button>
         <button class="linklike" data-action="dayToday"><b>${dayLabel}</b></button>
         <button class="iconbtn" data-action="day" data-d="1" ${s.day >= today ? "disabled" : ""} aria-label="Next day">${icon("mdi:chevron-right")}</button></div>
       <div class="card summary">
-        <div class="ringwrap">${ring}<div class="ringtext"><div class="big">${r0(Math.abs(f.remaining ?? 0))}</div><div class="muted small">${(f.remaining ?? 0) >= 0 ? "kcal left" : "kcal over"}</div></div></div>
+        <div class="ringwrap">${ringChart(t.kcal, target)}<div class="ringtext"><div class="big">${r0(Math.abs(f.remaining ?? 0))}</div><div class="muted small">${(f.remaining ?? 0) >= 0 ? "kcal left" : "kcal over"}</div></div></div>
         <div class="sumright">
           <div class="row between small"><span>Eaten</span><b>${r0(t.kcal)}</b></div>
           <div class="row between small"><span>Target</span><b>${r0(target)}</b></div>
@@ -502,6 +601,35 @@ class HealthAssistantPanel extends HTMLElement {
       </div>
       ${s.overview && !s.overview.food_db ? `<div class="card warn small">Food database not found — search shows only your custom foods. See the README to build it.</div>` : ""}
       ${meals}`;
+    return this._head("Nutrition") + `<div class="cols"><div class="colmain">${left}</div><aside class="colside">${this._statsHtml()}</aside></div>`;
+  }
+
+  _statsHtml() {
+    const st = this._s.stats;
+    if (!st) return "";
+    const W = [["d7", "7 days"], ["d30", "30 days"], ["all", `All (${st.all.days_logged}d)`]];
+    const row = (label, key, unit) => `<tr><th>${label}</th>${W.map(([k]) => { const v = st[k].avg[key]; return `<td>${v == null ? "–" : r0(v) + unit}</td>`; }).join("")}</tr>`;
+    const max = Math.max(st.target || 0, ...st.series.map((d) => d.kcal), 1) * 1.08;
+    const today = localDate();
+    const bars = st.series.map((d) => {
+      const h = (d.kcal / max) * 100;
+      const over = st.target && d.kcal > st.target * 1.1;
+      const dt = new Date(d.date + "T12:00:00");
+      return `<div class="bcol" title="${fmtDate(d.date + "T12:00:00")}: ${r0(d.kcal)} kcal"><div class="bbar ${over ? "over" : ""} ${d.date === today ? "today" : ""}" style="height:${h}%"></div><span>${"SMTWTFS"[dt.getDay()]}</span></div>`;
+    }).join("");
+    const tl = st.target ? `<div class="tline" style="bottom:${(st.target / max) * 100}%"><span>${r0(st.target)}</span></div>` : "";
+    const d30 = st.d30;
+    return `<div class="card stats-card">
+        <h3>Averages</h3>
+        <table class="avg"><thead><tr><th></th>${W.map(([, l]) => `<th>${l}</th>`).join("")}</tr></thead>
+        <tbody>${row("Calories", "kcal", "")}${row("Protein", "protein", " g")}${row("Carbs", "carbs", " g")}${row("Fat", "fat", " g")}</tbody></table>
+        <div class="muted xsmall">Averages use days you logged food, not counting today.</div>
+      </div>
+      <div class="card"><h3>Last 14 days</h3><div class="bars"><div class="plot">${tl}${bars}</div></div></div>
+      <div class="minitiles">
+        <div class="card mini"><div class="muted small">Logging streak</div><div class="big">${st.streak}<small> day${st.streak === 1 ? "" : "s"}</small></div></div>
+        <div class="card mini"><div class="muted small">On target · 30 days</div><div class="big">${d30.on_target_days ?? "–"}<small> / ${d30.days_logged}</small></div><div class="muted xsmall">within ±10%</div></div>
+      </div>`;
   }
 
   _amountText(e) {
@@ -519,7 +647,7 @@ class HealthAssistantPanel extends HTMLElement {
         <div id="foodresults">${this._foodResults(sh)}</div>`;
     } else if (sh.mode === "quick") {
       body = `<div class="form">
-        <label>Name<input data-q="name" value="Quick add" ></label>
+        <label>Name<input data-q="name" value="Quick add"></label>
         <div class="grid2"><label>Calories<input data-q="kcal" inputmode="decimal"></label><label>Protein (g)<input data-q="protein" inputmode="decimal"></label>
         <label>Carbs (g)<input data-q="carbs" inputmode="decimal"></label><label>Fat (g)<input data-q="fat" inputmode="decimal"></label></div>
         <button class="btn primary full" data-action="quickAdd">Add to ${cap(sh.meal)}</button></div>`;
@@ -539,10 +667,9 @@ class HealthAssistantPanel extends HTMLElement {
   _foodResults(sh) {
     const row = (f, src, i) => `<button class="foodrow" data-action="pickFood" data-src="${src}" data-i="${i}">
       <div><div>${esc(f.name)}${f.brand ? ` <span class="muted small">${esc(f.brand)}</span>` : ""}</div>
-      <div class="muted small">${esc(servingLabel(f))}</div></div><span class="kcal">${r0(perServingKcal(f))}</span></button>`;
+      <div class="muted small">${esc(servingLabel(f))}</div></div><span class="kcal">${r0(portion(f, 1, "serving").kcal)}</span></button>`;
     if (!sh.query) {
-      const recent = sh.recent || [];
-      const custom = sh.custom || [];
+      const recent = sh.recent || [], custom = sh.custom || [];
       if (!recent.length && !custom.length) return `<p class="muted center">Search 300,000+ foods from OpenNutrition.</p>`;
       return (recent.length ? `<h3>Recent</h3>${recent.map((f, i) => row(f, "recent", i)).join("")}` : "") +
         (custom.length ? `<h3>My foods</h3>${custom.map((f, i) => row(f, "custom", i)).join("")}` : "");
@@ -579,7 +706,7 @@ class HealthAssistantPanel extends HTMLElement {
   /* ============================================================ PROFILE */
   _viewProfile() {
     const o = this._s.overview;
-    if (!o) return `<div class="empty">Loading…</div>`;
+    if (!o) return this._head("Profile") + `<div class="empty">Loading…</div>`;
     const u = this._units, p = o.profile, e = o.energy || {};
     const weights = (this._s.vitals.weight || []).slice().reverse();
     const cur = o.latest.weight?.value;
@@ -601,7 +728,8 @@ class HealthAssistantPanel extends HTMLElement {
       return `<button class="tile" data-action="openVital" data-type="${k}">${icon(v.icon)}<div class="muted small">${v.label}</div><div class="tileval">${val}</div>
         <div class="muted xsmall">${l ? fmtDate(l.recorded_at, { month: "short", day: "numeric" }) : "Tap to log"}</div></button>`;
     }).join("");
-    return `<div class="card">
+    const manual = e.target_manual || (e.macros_manual || []).length;
+    return this._head("Profile", this._narrow ? this._profileSelect() : "") + `<div class="card">
         <div class="row between"><div><h2>${esc(p.name)}</h2><div class="muted small">${goalWord}${o.workouts_7d ? ` · ${o.workouts_7d} workout${o.workouts_7d > 1 ? "s" : ""} this week` : ""}</div></div>
         <button class="iconbtn" data-action="editProfile" aria-label="Edit profile">${icon("mdi:pencil")}</button></div>
         <div class="weights"><div><div class="muted small">Current</div><div class="big">${r1(u.wOut(cur))} <small>${u.w}</small></div></div>
@@ -613,32 +741,32 @@ class HealthAssistantPanel extends HTMLElement {
       </div>
       <h3 class="section">Health stats</h3>
       <div class="tiles">${tiles}</div>
-      <h3 class="section">Energy</h3>
+      <div class="row between section"><h3>Daily targets</h3><button class="btn ghost" data-action="editTargets">${icon("mdi:pencil")} Edit</button></div>
       <div class="card energy">
         <div class="egrid">
-          <div><div class="muted small">BMR</div><div class="big">${r0(e.bmr)}</div></div>
+          <div><div class="muted small">Calories${e.target_manual ? ` <span class="badge blue">Manual</span>` : ""}</div><div class="big accent">${r0(e.target)}</div></div>
           <div><div class="muted small">Maintenance</div><div class="big">${r0(e.maintenance)}</div></div>
-          <div><div class="muted small">Daily target</div><div class="big accent">${r0(e.target)}</div></div>
+          <div><div class="muted small">BMR</div><div class="big">${r0(e.bmr)}</div></div>
         </div>
-        <div class="muted small">${esc(e.formula || "")} · ${esc(e.activity_label || "")} (×${e.activity_multiplier ?? "–"}) · ${r0(p.daily_steps)} steps/day · ${p.lifting_days} lifting day${p.lifting_days === 1 ? "" : "s"}/wk</div>
-        ${e.daily_adjustment ? `<div class="muted small">${e.daily_adjustment < 0 ? "Deficit" : "Surplus"} of ${r0(Math.abs(e.daily_adjustment))} kcal/day for ${r1(u.wOut(p.goal_rate_kg_week, 2))} ${u.w}/week${e.target_floored ? " (raised to a safe minimum)" : ""}</div>` : ""}
         <div class="egrid">
           <div><div class="muted small">Protein</div><b>${r0(e.protein_g)} g</b></div>
           <div><div class="muted small">Carbs</div><b>${r0(e.carbs_g)} g</b></div>
           <div><div class="muted small">Fat</div><b>${r0(e.fat_g)} g</b></div>
         </div>
+        <div class="muted small">${esc(e.formula || "")} · ${esc(e.activity_label || "")} (×${e.activity_multiplier ?? "–"}) · ${r0(p.daily_steps)} steps/day · ${p.lifting_days} lifting day${p.lifting_days === 1 ? "" : "s"}/wk</div>
+        ${manual ? `<div class="muted small">Calculated target: ${r0(e.target_auto)} kcal</div>` : e.daily_adjustment ? `<div class="muted small">${e.daily_adjustment < 0 ? "Deficit" : "Surplus"} of ${r0(Math.abs(e.daily_adjustment))} kcal/day for ${r1(u.wOut(p.goal_rate_kg_week, 2))} ${u.w}/week${e.target_floored ? " (raised to a safe minimum)" : ""}</div>` : ""}
+      </div>
+      <h3 class="section">Settings</h3>
+      <div class="card list">
+        <button class="listrow" data-action="workoutSettings">${icon("mdi:timer-cog-outline")}<span>Workout & rest timer</span><span class="muted">${fmtRest(p.rest_default_s ?? 120)}${p.live_activity_notify ? " · iPhone" : ""}</span>${icon("mdi:chevron-right", "muted")}</button>
+        <button class="listrow" data-action="editProfile">${icon("mdi:account-edit-outline")}<span>Body & goal</span><span></span>${icon("mdi:chevron-right", "muted")}</button>
       </div>`;
-  }
-
-  async _sheetVitalData(type) {
-    const list = await this.ws("vitals/list", { vital_type: type, limit: 30 });
-    return { kind: "vital", type, list };
   }
 
   _sheetVital(sh) {
     const u = this._units, v = VITALS[sh.type];
     let fields;
-    if (sh.type === "weight") fields = `<label>Weight (${u.w})<input data-v="value" inputmode="decimal" autofocus></label>`;
+    if (sh.type === "weight") fields = `<label>Weight (${u.w})<input data-v="value" inputmode="decimal"></label>`;
     else if (sh.type === "height") fields = u.imp
       ? `<div class="grid2"><label>Feet<input data-v="ft" inputmode="numeric"></label><label>Inches<input data-v="in" inputmode="decimal"></label></div>`
       : `<label>Height (cm)<input data-v="value" inputmode="decimal"></label>`;
@@ -646,20 +774,56 @@ class HealthAssistantPanel extends HTMLElement {
     else fields = `<label>${v.label} (${v.unit})<input data-v="value" inputmode="decimal"></label>`;
     const fmt = (x) => sh.type === "weight" ? `${r1(u.wOut(x.value))} ${u.w}` : sh.type === "height" ? u.h(x.value)
       : sh.type === "blood_pressure" ? `${r0(x.systolic)}/${r0(x.diastolic)} mmHg` : `${r1(x.value)} ${v.unit}`;
-    const hist = sh.list.map((x) => `<div class="histrow row between"><div><div>${fmt(x)}</div><div class="muted small">${fmtDate(x.recorded_at)} · ${fmtTime(x.recorded_at)}${x.note ? ` · ${esc(x.note)}` : ""}</div></div>
+    const hist = (sh.list || []).map((x) => `<div class="histrow row between"><div><div>${fmt(x)}</div><div class="muted small">${fmtDate(x.recorded_at)} · ${fmtTime(x.recorded_at)}${x.note ? ` · ${esc(x.note)}` : ""}</div></div>
       <button class="iconbtn sm" data-action="deleteVital" data-id="${x.id}" aria-label="Delete">${icon("mdi:delete-outline")}</button></div>`).join("");
     return `<h2>${icon(v.icon)} ${v.label}</h2>
       <div class="form">${fields}<label>When<input type="datetime-local" data-v="when" value="${toLocalInput()}"></label>
       <label>Note (optional)<input data-v="note"></label>
       <button class="btn primary full" data-action="saveVital">Save</button></div>
-      ${hist ? `<h3>History</h3>${hist}` : ""}`;
+      ${sh.list ? (hist ? `<h3>History</h3>${hist}` : "") : `<p class="muted center small">Loading history…</p>`}`;
+  }
+
+  _sheetTargets() {
+    const o = this._s.overview, p = o.profile, e = o.energy;
+    const auto = e.macros_auto || {};
+    const val = (k) => (p[k] ? p[k] : "");
+    return `<h2>Daily targets</h2>
+      <p class="muted small">Leave a field blank to use the calculated value (shown in grey). If you only set calories, protein stays calculated, fat is 25% and carbs fill the rest.</p>
+      <div class="form">
+        <label>Calories (kcal)<input data-t="calorie_target_override" inputmode="numeric" value="${val("calorie_target_override")}" placeholder="${r0(e.target_auto)}"></label>
+        <div class="grid3">
+          <label>Protein (g)<input data-t="protein_override_g" inputmode="numeric" value="${val("protein_override_g")}" placeholder="${r0(auto.protein_g)}"></label>
+          <label>Carbs (g)<input data-t="carbs_override_g" inputmode="numeric" value="${val("carbs_override_g")}" placeholder="${r0(auto.carbs_g)}"></label>
+          <label>Fat (g)<input data-t="fat_override_g" inputmode="numeric" value="${val("fat_override_g")}" placeholder="${r0(auto.fat_g)}"></label>
+        </div>
+        <div class="muted small" id="macrokcal"></div>
+        <button class="btn primary full" data-action="saveTargets">Save</button>
+        <button class="btn ghost full" data-action="resetTargets">Use calculated targets</button>
+      </div>`;
+  }
+
+  _sheetWorkoutSettings(sh) {
+    const p = this._s.overview.profile;
+    const cur = p.rest_default_s ?? 120;
+    const targets = sh.targets;
+    return `<h2>Workout & rest timer</h2>
+      <div class="form">
+        <label>Default rest timer
+          <select data-ws="rest_default_s">${REST_OPTIONS.map((v) => `<option value="${v}" ${v === cur ? "selected" : ""}>${fmtRest(v)}</option>`).join("")}</select></label>
+        <p class="muted small">New exercises use this. Each exercise remembers its own rest time once you change it from the ••• menu.</p>
+        <label>Show rest timer on iPhone (Dynamic Island & Lock Screen)
+          <select data-ws="live_activity_notify"><option value="">Off</option>${(targets || []).map((t) => `<option value="${esc(t)}" ${t === p.live_activity_notify ? "selected" : ""}>${esc(t.replace(/^mobile_app_/, "").replace(/_/g, " "))}</option>`).join("")}</select></label>
+        ${targets && !targets.length ? `<p class="muted small">No Companion app devices found. Install the Home Assistant app on your phone and sign in first.</p>` : ""}
+        <p class="muted small">Uses Live Activities from the Home Assistant Companion app (app 2026.9+, iOS 17.2+, Home Assistant 2026.7+). The workout clock shows while you train and switches to a countdown when you rest. Allow Live Activities for Home Assistant in iPhone Settings.</p>
+        <button class="btn primary full" data-action="saveWorkoutSettings">Save</button>
+      </div>`;
   }
 
   _sheetProfile() {
     const p = this._s.overview.profile, u = this._units;
     const hcm = this._s.overview.latest.height?.value ?? p.height_cm;
     const tin = hcm / 2.54;
-    return `<h2>Edit profile</h2><div class="form">
+    return `<h2>Body & goal</h2><div class="form">
       <label>Name<input data-p="name" value="${esc(p.name)}"></label>
       <div class="grid2">
         <label>Units<select data-p="units"><option value="imperial" ${u.imp ? "selected" : ""}>Imperial</option><option value="metric" ${!u.imp ? "selected" : ""}>Metric</option></select></label>
@@ -699,28 +863,50 @@ class HealthAssistantPanel extends HTMLElement {
       <button class="btn primary full" data-action="tplSave">Save template</button>`;
   }
 
+  _pickerList(sh) {
+    const words = (sh.query || "").toLowerCase().split(/\s+/).filter(Boolean);
+    const hay = (e) => `${e.name} ${e.muscle} ${e.equipment}`.toLowerCase();
+    const list = this._s.exercises.filter((e) => (!sh.muscle || e.muscle === sh.muscle) && words.every((w) => hay(e).includes(w)));
+    return list.map((e) => `<button class="foodrow" data-action="pickExercise" data-id="${e.id}"><div><div>${esc(e.name)}</div><div class="muted small">${esc(e.muscle)} · ${esc(e.equipment)}</div></div>${icon("mdi:plus")}</button>`).join("")
+      || `<p class="muted center">No matches.</p>`;
+  }
+
   _sheetPicker(sh) {
-    const q = (sh.query || "").toLowerCase();
     const muscles = [...new Set(this._s.exercises.map((e) => e.muscle))];
-    const list = this._s.exercises.filter((e) => (!sh.muscle || e.muscle === sh.muscle) && (!q || e.name.toLowerCase().includes(q)));
-    return `<h2>Add exercise</h2>
+    return `<h2>${esc(sh.title || "Add exercise")}</h2>
       <div class="searchbox">${icon("mdi:magnify")}<input id="exq" type="search" placeholder="Search exercises" value="${esc(sh.query || "")}" data-input="exSearch" autocomplete="off"></div>
       <div class="chips"><button class="chip ${!sh.muscle ? "on" : ""}" data-action="exMuscle" data-m="">All</button>${muscles.map((m) => `<button class="chip ${sh.muscle === m ? "on" : ""}" data-action="exMuscle" data-m="${esc(m)}">${esc(m)}</button>`).join("")}</div>
-      <div id="exlist">${list.map((e) => `<button class="foodrow" data-action="pickExercise" data-id="${e.id}"><div><div>${esc(e.name)}</div><div class="muted small">${esc(e.muscle)} · ${esc(e.equipment)}</div></div>${icon("mdi:plus")}</button>`).join("")}</div>
+      <div id="exlist">${this._pickerList(sh)}</div>
       <details class="newex"><summary>Create custom exercise</summary><div class="form">
-        <label>Name<input data-nx="name" value="${esc(sh.query || "")}"></label>
+        <label>Name<input data-nx="name"></label>
         <div class="grid2"><label>Muscle group<input data-nx="muscle" placeholder="e.g. Chest"></label>
         <label>Equipment<input data-nx="equipment" placeholder="e.g. Cable"></label></div>
         <label>Tracks<select data-nx="kind"><option value="weight_reps">Weight & reps</option><option value="bodyweight_reps">Bodyweight reps</option><option value="duration">Time</option><option value="distance">Distance & time</option></select></label>
         <button class="btn primary full" data-action="createExercise">Create & add</button></div></details>`;
   }
 
+  /* An iOS-style action sheet. items: [{label, icon, run, danger, sub, swatch, on}] */
+  _actionSheet(title, items, subtitle = "") {
+    this._openSheet({ kind: "menu", title, subtitle, items });
+  }
+  _sheetMenu(sh) {
+    return `${sh.title ? `<h2>${esc(sh.title)}</h2>` : ""}${sh.subtitle ? `<div class="muted small">${esc(sh.subtitle)}</div>` : ""}
+      <div class="menu">${sh.items.map((it, i) => `<button class="menuitem ${it.danger ? "danger" : ""} ${it.on ? "on" : ""}" data-action="menuItem" data-i="${i}">
+        ${it.swatch ? `<span class="setbadge ${it.swatch}">${it.swatchText}</span>` : it.icon ? icon(it.icon) : ""}
+        <span class="mlabel">${esc(it.label)}${it.sub ? `<span class="muted small">${esc(it.sub)}</span>` : ""}</span>
+        ${it.on ? icon("mdi:check", "accent") : ""}</button>`).join("")}</div>`;
+  }
+
   /* ============================================================== sheets */
-  _openSheet(sh) { this._s.sheets.push(sh); this._renderSheet(); }
-  _closeSheet() { this._s.sheets.pop(); this._renderSheet(); }
+  _openSheet(sh) { this._s.sheets.push(sh); this._renderSheet(true); }
+  _closeSheet() {
+    const sh = this._s.sheets.pop();
+    sh?.onClose?.();
+    this._renderSheet();
+  }
   get _sheet() { return this._s.sheets[this._s.sheets.length - 1]; }
 
-  _renderSheet() {
+  _renderSheet(animate = false) {
     const el = this.shadowRoot.getElementById("sheet");
     if (!el) return;
     const sh = this._sheet;
@@ -728,23 +914,55 @@ class HealthAssistantPanel extends HTMLElement {
     let body = "";
     switch (sh.kind) {
       case "html": body = sh.html; break;
+      case "menu": body = this._sheetMenu(sh); break;
       case "addFood": body = this._sheetAddFood(sh); break;
       case "portion": body = this._sheetPortion(sh); break;
       case "vital": body = this._sheetVital(sh); break;
       case "profile": body = this._sheetProfile(); break;
+      case "targets": body = this._sheetTargets(); break;
+      case "workoutSettings": body = this._sheetWorkoutSettings(sh); break;
       case "template": body = this._sheetTemplate(sh); break;
       case "picker": body = this._sheetPicker(sh); break;
+      case "effort": body = `<h2>How hard was that set?</h2><div class="muted small">${esc(sh.subtitle)}</div>
+        <div class="menu">${EFFORT.map(([v, l, d]) => `<button class="menuitem effort" data-action="effort" data-v="${v}"><span class="rpebig e${v}">${v}</span><span class="mlabel">${l}<span class="muted small">${d}</span></span></button>`).join("")}</div>
+        <button class="btn ghost full" data-action="effort" data-v="">Skip</button>`; break;
       case "confirm": body = `<h2>${esc(sh.title)}</h2><p>${esc(sh.text)}</p><div class="actions"><button class="btn" data-action="confirmNo">Cancel</button><button class="btn ${sh.danger ? "danger" : "primary"}" data-action="confirmYes">${esc(sh.ok)}</button></div>`; break;
     }
-    const prevScroll = el.querySelector(".sheetbody")?.scrollTop || 0;
+    const prevScroll = animate ? 0 : el.querySelector(".sheetbody")?.scrollTop || 0;
     el.innerHTML = `<div class="scrim" data-action="closeSheet"></div>
-      <div class="sheet" role="dialog"><div class="grab"></div><button class="iconbtn close" data-action="closeSheet" aria-label="Close">${icon("mdi:close")}</button>
-      <div class="sheetbody">${body}</div></div>`;
+      <div class="sheet ${animate ? "anim" : ""}" role="dialog" aria-modal="true">
+        <div class="grabzone"><div class="grab"></div></div>
+        <button class="iconbtn close" data-action="closeSheet" aria-label="Close">${icon("mdi:close")}</button>
+        <div class="sheetbody">${body}</div></div>`;
     el.querySelector(".sheetbody").scrollTop = prevScroll;
   }
 
+  /* Swipe a sheet down to dismiss (from the grab handle, or anywhere when scrolled to the top). */
+  _dragStart(e) {
+    const sheet = e.target.closest?.(".sheet");
+    if (!sheet || !this._narrow || e.target.closest("input,select,textarea")) return;
+    const body = sheet.querySelector(".sheetbody");
+    if (!e.target.closest(".grabzone") && body.scrollTop > 0) return;
+    this._drag = { sheet, y0: e.touches[0].clientY, dy: 0 };
+  }
+  _dragMove(e) {
+    const d = this._drag;
+    if (!d) return;
+    d.dy = Math.max(0, e.touches[0].clientY - d.y0);
+    if (d.dy > 4) { e.preventDefault(); d.sheet.style.transition = "none"; d.sheet.style.transform = `translateY(${d.dy}px)`; }
+  }
+  _dragEnd() {
+    const d = this._drag;
+    this._drag = null;
+    if (!d) return;
+    if (d.dy > 110) {
+      d.sheet.style.transition = "transform .18s ease-in"; d.sheet.style.transform = "translateY(100%)";
+      setTimeout(() => this._act("closeSheet", d.sheet, null), 170);
+    } else { d.sheet.style.transition = "transform .18s"; d.sheet.style.transform = ""; }
+  }
+
   _confirm(title, text, ok = "OK", danger = false) {
-    return new Promise((resolve) => this._openSheet({ kind: "confirm", title, text, ok, danger, resolve }));
+    return new Promise((resolve) => this._openSheet({ kind: "confirm", title, text, ok, danger, resolve, onClose: () => resolve(false) }));
   }
 
   _toast(msg, err = false) {
@@ -752,10 +970,131 @@ class HealthAssistantPanel extends HTMLElement {
     if (!el) return;
     el.innerHTML = `<div class="toast ${err ? "err" : ""}">${esc(msg)}</div>`;
     clearTimeout(this._toastT);
-    this._toastT = setTimeout(() => (el.innerHTML = ""), 2800);
+    this._toastT = setTimeout(() => (el.innerHTML = ""), 2600);
   }
 
   _exName(id) { return this._exMap?.[id]?.name || id; }
+
+  /* ===================================================== workout helpers */
+  _exerciseMenu(ei) {
+    const s = this._s, ex = s.active.exercises[ei];
+    const name = this._exName(ex.exercise_id);
+    this._actionSheet(name, [
+      { label: "Add warm-up set", icon: "mdi:fire", run: () => {
+        const at = ex.sets.findIndex((x) => x.type !== "warmup");
+        ex.sets.splice(at === -1 ? ex.sets.length : at, 0, blankSet("warmup"));
+        this._queueWorkoutSave(); this._render();
+      } },
+      { label: "Update rest timer", sub: fmtRest(ex.rest_s ?? 120), icon: "mdi:timer-outline", run: () => this._restMenu(ei) },
+      { label: "Replace exercise", icon: "mdi:swap-horizontal", run: () => this._openPicker("Replace exercise", async (id) => {
+        ex.exercise_id = id;
+        await this._loadLast([id]);
+        ex.rest_s = s.last[id]?.rest_s ?? ex.rest_s;
+        this._queueWorkoutSave(); this._render();
+      }) },
+      ex.superset
+        ? { label: "Remove from superset", icon: "mdi:link-variant-off", run: () => { this._leaveSuperset(ex); this._queueWorkoutSave(); this._render(); } }
+        : { label: "Create superset", icon: "mdi:link-variant", run: () => this._supersetMenu(ei) },
+      { label: "Remove exercise", icon: "mdi:delete-outline", danger: true, run: async () => {
+        if (!(await this._confirm("Remove exercise?", `Remove ${name} and its sets from this workout?`, "Remove", true))) return;
+        this._leaveSuperset(ex);
+        s.active.exercises.splice(s.active.exercises.indexOf(ex), 1);
+        this._queueWorkoutSave(); this._render();
+      } },
+    ]);
+  }
+
+  _restMenu(ei) {
+    const ex = this._s.active.exercises[ei];
+    const cur = ex.rest_s ?? 120;
+    this._actionSheet(`Rest timer · ${this._exName(ex.exercise_id)}`, REST_OPTIONS.map((v) => ({
+      label: fmtRest(v), on: v === cur, run: () => { ex.rest_s = v; this._queueWorkoutSave(); this._render(); },
+    })));
+  }
+
+  _supersetMenu(ei) {
+    const s = this._s, ex = s.active.exercises[ei];
+    const others = s.active.exercises.filter((o) => o !== ex);
+    const join = (other) => {
+      const id = other.superset || rid();
+      other.superset = id; ex.superset = id;
+      // Keep superset partners next to each other: move this exercise after the group's last member.
+      const list = s.active.exercises;
+      list.splice(list.indexOf(ex), 1);
+      let at = -1;
+      list.forEach((o, i) => { if (o.superset === id) at = i; });
+      list.splice(at + 1, 0, ex);
+      this._queueWorkoutSave(); this._render();
+    };
+    this._actionSheet("Superset with…", [
+      ...others.map((o) => ({ label: this._exName(o.exercise_id), icon: "mdi:dumbbell", sub: o.superset ? "Already in a superset — joins it" : "", run: () => join(o) })),
+      { label: "Add a new exercise", icon: "mdi:plus", run: () => this._openPicker("Superset with…", async (id) => {
+        join(await this._addExercise(id));
+      }) },
+    ], "Sets alternate between exercises; rest starts after the last exercise in the superset.");
+  }
+
+  _leaveSuperset(ex) {
+    const id = ex.superset;
+    if (!id) return;
+    ex.superset = null;
+    const rest = this._s.active.exercises.filter((o) => o.superset === id);
+    if (rest.length === 1) rest[0].superset = null;
+  }
+
+  _openPicker(title, onPick) { this._openSheet({ kind: "picker", title, query: "", muscle: "", onPick }); }
+
+  async _addExercise(id) {
+    await this._loadLast([id]);
+    const last = this._s.last[id];
+    const count = Math.max(3, (last?.sets || []).filter((x) => x.type !== "warmup").length || 3);
+    const ex = { id: rid(), exercise_id: id, notes: "", rest_s: last?.rest_s ?? this._s.overview.profile.rest_default_s ?? 120, superset: null,
+      sets: Array.from({ length: count }, () => blankSet()) };
+    this._s.active.exercises.push(ex);
+    this._queueWorkoutSave();
+    return ex;
+  }
+
+  _setMenu(ei, si) {
+    const ex = this._s.active.exercises[ei], x = ex.sets[si];
+    const items = Object.entries(SET_TYPES).map(([k, t]) => ({
+      label: t.label, swatch: t.cls, swatchText: t.short || "1", on: x.type === k,
+      run: () => { x.type = k; this._queueWorkoutSave(); this._render(); },
+    }));
+    items.push({ label: "Remove set", icon: "mdi:delete-outline", danger: true, run: () => { ex.sets.splice(si, 1); this._queueWorkoutSave(); this._render(); } });
+    this._actionSheet(`Set ${si + 1} · ${this._exName(ex.exercise_id)}`, items);
+  }
+
+  async _completeSet(ei, si) {
+    const s = this._s, ex = s.active.exercises[ei], x = ex.sets[si];
+    const kind = this._exMap[ex.exercise_id]?.kind || "weight_reps";
+    const prev = prevFor(s.last[ex.exercise_id], ex.sets, si);
+    // An empty field accepts last time's number (shown as the placeholder).
+    for (const k of ["weight", "reps", "duration_s", "distance_m"]) if (x[k] == null && prev?.[k] != null) x[k] = prev[k];
+    const missing = kind === "duration" ? x.duration_s == null : kind === "distance" ? x.distance_m == null : x.reps == null;
+    if (missing) { this._toast(kind === "duration" ? "Enter a time first" : kind === "distance" ? "Enter a distance first" : "Enter reps first", true); this._render(); return; }
+    const rpe = await new Promise((resolve) => this._openSheet({ kind: "effort", subtitle: `${this._exName(ex.exercise_id)} · ${this._setText(ex.exercise_id, x)}`, resolve, onClose: () => resolve(undefined) }));
+    if (rpe === undefined) { this._render(); return; } // dismissed: leave the set unchecked
+    x.rpe = rpe; x.completed = true;
+    this._queueWorkoutSave();
+    // Supersets: only rest after the last exercise in the group.
+    const group = ex.superset ? s.active.exercises.filter((o) => o.superset === ex.superset) : [ex];
+    const isLast = group[group.length - 1] === ex;
+    const restS = ex.rest_s ?? 120;
+    if (x.type !== "warmup" && isLast && restS > 0) {
+      this._setRest({ ends_at: now() + restS, total: restS, exercise_id: this._nextUp(ei) });
+    } else if (!isLast) {
+      this._toast(`Next: ${this._exName(group[group.indexOf(ex) + 1].exercise_id)}`);
+    }
+    this._render();
+  }
+
+  _nextUp(ei) {
+    // Exercise of the next unchecked set (shown in the Live Activity).
+    const list = this._s.active.exercises;
+    for (let i = ei; i < list.length; i++) if (list[i].sets.some((x) => !x.completed)) return list[i].exercise_id;
+    return list[ei]?.exercise_id;
+  }
 
   /* ============================================================== events */
   _onClick(e) {
@@ -764,19 +1103,21 @@ class HealthAssistantPanel extends HTMLElement {
     this._act(el.dataset.action, el, e);
   }
 
-  async _act(action, el, ev) {
-    const s = this._s, d = el.dataset;
+  async _act(action, el) {
+    const s = this._s, d = el?.dataset || {};
     try {
       switch (action) {
         case "menu": this.dispatchEvent(new Event("hass-toggle-menu", { bubbles: true, composed: true })); break;
         case "tab":
           s.tab = d.tab; localStorage.setItem("ha-health-tab", s.tab); s.sheets = [];
-          this._render(); await this._loadTab(); this._render();
-          this.shadowRoot.getElementById("content").scrollTop = 0;
+          this._render(); this.shadowRoot.getElementById("content").scrollTop = 0;
+          await this._loadTab(); this._render();
           break;
-        case "closeSheet": { const sh = this._sheet; if (sh?.kind === "confirm") sh.resolve(false); this._closeSheet(); break; }
-        case "confirmYes": { const sh = this._sheet; this._closeSheet(); sh.resolve(true); break; }
-        case "confirmNo": { const sh = this._sheet; this._closeSheet(); sh.resolve(false); break; }
+        case "closeSheet": this._closeSheet(); break;
+        case "confirmYes": { const sh = s.sheets.pop(); this._renderSheet(); sh.resolve(true); break; }
+        case "confirmNo": this._closeSheet(); break;
+        case "menuItem": { const sh = s.sheets.pop(); this._renderSheet(); await sh.items[+d.i].run(); break; }
+        case "effort": { const sh = s.sheets.pop(); this._renderSheet(); sh.resolve(d.v === "" ? null : Number(d.v)); break; }
 
         /* history */
         case "historyMode": s.historyMode = d.mode; this._render(); await this._loadTab(); this._render(); break;
@@ -784,11 +1125,14 @@ class HealthAssistantPanel extends HTMLElement {
           const res = await this.ws("workout/list", { offset: s.workouts.length, limit: 20 });
           s.workouts = s.workouts.concat(res.items); s.workoutsTotal = res.total; this._render(); break;
         }
-        case "openWorkout": {
-          const w = s.workouts.find((x) => x.id === d.id);
-          this._openSheet({ kind: "html", html: this._sheetWorkout(w) }); break;
+        case "openWorkout": this._openSheet({ kind: "html", html: this._sheetWorkout(s.workouts.find((x) => x.id === d.id)) }); break;
+        case "openExercise": {
+          const sh = { kind: "html", html: `<h2>${esc(this._exName(d.id))}</h2><p class="muted">Loading…</p>` };
+          this._openSheet(sh);
+          sh.html = await this._sheetExerciseHtml(d.id);
+          if (this._sheet === sh) this._renderSheet();
+          break;
         }
-        case "openExercise": this._openSheet({ kind: "html", html: await this._sheetExercise(d.id) }); break;
         case "deleteWorkout":
           if (!(await this._confirm("Delete workout?", "This can't be undone.", "Delete", true))) break;
           await this.ws("workout/delete", { workout_id: d.id });
@@ -808,10 +1152,9 @@ class HealthAssistantPanel extends HTMLElement {
         case "finishWorkout": {
           await this._flushWorkout();
           const incomplete = s.active.exercises.some((x) => x.sets.some((y) => !y.completed));
-          const ok = await this._confirm("Finish workout?", incomplete ? "Sets that aren't checked off will be dropped." : "Nice work!", "Finish");
-          if (!ok) break;
+          if (!(await this._confirm("Finish workout?", incomplete ? "Sets that aren't checked off will be dropped." : "Nice work!", "Finish"))) break;
           const w = await this.ws("workout/finish");
-          s.active = null; s.rest = null; s.workouts = null; s.records = null; s.last = {};
+          s.active = null; s.workouts = null; s.records = null; s.last = {};
           await this._refreshOverview();
           s.tab = "history"; localStorage.setItem("ha-health-tab", "history");
           await this._loadTab(); this._render();
@@ -822,61 +1165,44 @@ class HealthAssistantPanel extends HTMLElement {
         case "discardWorkout":
           if (!(await this._confirm("Discard workout?", "Everything logged in this workout will be lost.", "Discard", true))) break;
           clearTimeout(this._saveTimer); this._saveTimer = null;
-          await this.ws("workout/discard"); s.active = null; s.rest = null; this._render(); break;
-        case "addExercise":
-          this._openSheet({ kind: "picker", query: "", muscle: "", onPick: async (id) => {
-            s.active.exercises.push({ id: rid(), exercise_id: id, notes: "", sets: [blankSet(), blankSet(), blankSet()] });
-            await this._loadLast([id]);
-            this._queueWorkoutSave(); this._render();
-          } });
-          break;
-        case "pickExercise": { const sh = this._sheet; this._closeSheet(); await sh.onPick(d.id); break; }
+          await this.ws("workout/discard"); s.active = null; this._render(); break;
+        case "addExercise": this._openPicker("Add exercise", async (id) => { await this._addExercise(id); this._render(); }); break;
+        case "pickExercise": { const sh = this._sheet; s.sheets.pop(); this._renderSheet(); await sh.onPick(d.id); break; }
         case "exMuscle": this._sheet.muscle = d.m; this._renderSheet(); break;
         case "createExercise": {
           const get = (k) => this.shadowRoot.querySelector(`[data-nx="${k}"]`)?.value;
           const ex = await this.ws("exercises/create", { exercise: { name: get("name"), muscle: get("muscle"), equipment: get("equipment"), kind: get("kind") } });
           s.exercises.push(ex); this._exMap[ex.id] = ex;
-          const sh = this._sheet; this._closeSheet(); await sh.onPick(ex.id); break;
+          const sh = this._sheet; s.sheets.pop(); this._renderSheet(); await sh.onPick(ex.id); break;
         }
-        case "removeExercise":
-          if (!(await this._confirm("Remove exercise?", `Remove ${this._exName(s.active.exercises[d.e].exercise_id)} and its sets?`, "Remove", true))) break;
-          s.active.exercises.splice(+d.e, 1); this._queueWorkoutSave(); this._render(); break;
+        case "exMenu": this._exerciseMenu(+d.e); break;
+        case "setMenu": this._setMenu(+d.e, +d.s); break;
         case "addSet": {
           const ex = s.active.exercises[+d.e];
-          const prev = ex.sets[ex.sets.length - 1];
-          ex.sets.push(blankSet(prev));
-          this._queueWorkoutSave(); this._render(); break;
-        }
-        case "removeSet": s.active.exercises[+d.e].sets.splice(+d.s, 1); this._queueWorkoutSave(); this._render(); break;
-        case "cycleType": {
-          const x = s.active.exercises[+d.e].sets[+d.s];
-          x.type = SET_TYPES[(SET_TYPES.indexOf(x.type) + 1) % SET_TYPES.length];
+          const lastSet = [...ex.sets].reverse().find((x) => x.type !== "warmup");
+          ex.sets.push(blankSet(lastSet && lastSet.type !== "working" ? lastSet.type : "working", lastSet));
           this._queueWorkoutSave(); this._render(); break;
         }
         case "usePrev": {
           const ex = s.active.exercises[+d.e];
           const prev = prevFor(s.last[ex.exercise_id], ex.sets, +d.s);
           if (!prev) break;
-          Object.assign(ex.sets[+d.s], { weight: prev.weight, reps: prev.reps, duration_s: prev.duration_s, distance_m: prev.distance_m });
+          Object.assign(ex.sets[+d.s], { weight: prev.weight, reps: prev.reps, duration_s: prev.duration_s, distance_m: prev.distance_m, autofill: false });
           this._queueWorkoutSave(); this._render(); break;
         }
         case "toggleSet": {
-          const ex = s.active.exercises[+d.e];
-          const x = ex.sets[+d.s];
-          const prev = prevFor(s.last[ex.exercise_id], ex.sets, +d.s);
-          // Checking an empty row uses the placeholder (last time's numbers), like most lifting apps.
-          if (!x.completed && prev) {
-            if (x.weight == null && prev.weight != null) x.weight = prev.weight;
-            if (x.reps == null && prev.reps != null) x.reps = prev.reps;
-            if (x.duration_s == null && prev.duration_s != null) x.duration_s = prev.duration_s;
-            if (x.distance_m == null && prev.distance_m != null) x.distance_m = prev.distance_m;
-          }
-          x.completed = !x.completed;
-          if (x.completed && x.type !== "warmup") s.rest = { endsAt: Date.now() + 90000, total: 90 };
-          this._queueWorkoutSave(); this._render(); break;
+          const x = s.active.exercises[+d.e].sets[+d.s];
+          if (x.completed) { x.completed = false; x.rpe = null; this._queueWorkoutSave(); this._render(); }
+          else await this._completeSet(+d.e, +d.s);
+          break;
         }
-        case "restAdj": if (s.rest) { s.rest.endsAt += +d.d * 1000; s.rest.total = Math.max(s.rest.total + +d.d, 1); } this._renderRest(); break;
-        case "restSkip": s.rest = null; this._renderRest(); break;
+        case "restAdj": {
+          const r = s.active?.rest; if (!r) break;
+          const ends = r.ends_at + +d.d;
+          if (ends <= now()) { this._setRest(null); break; }
+          this._setRest({ ...r, ends_at: ends, total: Math.max(1, r.total + +d.d) }); break;
+        }
+        case "restSkip": this._setRest(null); break;
 
         /* templates */
         case "newTemplate": this._openSheet({ kind: "template", tpl: { name: "", exercises: [] } }); break;
@@ -886,10 +1212,10 @@ class HealthAssistantPanel extends HTMLElement {
           await this.ws("templates/delete", { template_id: d.id }); s.templates = await this.ws("templates/list"); this._render(); break;
         case "tplAddExercise": {
           const tsh = this._sheet;
-          this._openSheet({ kind: "picker", query: "", muscle: "", onPick: (id) => {
+          this._openPicker("Add exercise", (id) => {
             tsh.tpl.exercises.push({ exercise_id: id, sets: [1, 2, 3].map(() => ({ type: "working", reps: 10, weight: null })) });
             this._renderSheet();
-          } });
+          });
           break;
         }
         case "tplRemove": this._sheet.tpl.exercises.splice(+d.i, 1); this._renderSheet(); break;
@@ -919,8 +1245,8 @@ class HealthAssistantPanel extends HTMLElement {
         case "addFood": {
           const sh = { kind: "addFood", meal: d.meal, mode: "search", query: "" };
           this._openSheet(sh);
-          const rec = await this.ws("food/recent");
-          Object.assign(sh, rec); if (this._sheet === sh) this._renderSheet();
+          Object.assign(sh, await this.ws("food/recent"));
+          if (this._sheet === sh && !sh.query) this._updateFoodResults();
           break;
         }
         case "foodMode": this._sheet.mode = d.mode; this._renderSheet(); break;
@@ -944,7 +1270,7 @@ class HealthAssistantPanel extends HTMLElement {
               per_100g: f.per_100g, per_serving: f.per_serving, serving_qty: f.serving_qty, serving_unit: f.serving_unit, serving_g: f.serving_g,
             } });
           }
-          s.sheets = []; s.food = await this.ws("food/day", { date: s.day }); this._render();
+          s.sheets = []; await this._reloadFood(); this._render();
           this._toast(sh.editId ? "Entry updated" : `Added ${f.name}`); break;
         }
         case "editFood": {
@@ -955,19 +1281,18 @@ class HealthAssistantPanel extends HTMLElement {
           if (e.unit === "g") food.per_100g = Object.fromEntries(Object.entries(per).map(([k, v]) => [k, v * 100]));
           else if (e.unit === "oz") food.per_100g = Object.fromEntries(Object.entries(per).map(([k, v]) => [k, (v / OZ_G) * 100]));
           else { food.per_serving = per; food.serving_g = e.grams && e.amount ? e.grams / e.amount : null; }
-          const unit = e.unit === "quick" ? "serving" : e.unit;
-          this._openSheet({ kind: "portion", food, amount: e.unit === "oz" ? e.amount : e.amount, unit: e.unit === "oz" ? "oz" : unit, meal: e.meal, editId: e.id });
+          this._openSheet({ kind: "portion", food, amount: e.amount, unit: e.unit === "quick" ? "serving" : e.unit, meal: e.meal, editId: e.id });
           break;
         }
         case "deleteFood":
           await this.ws("food/delete", { entry_id: d.id });
-          s.sheets = []; s.food = await this.ws("food/day", { date: s.day }); this._render(); this._toast("Entry deleted"); break;
+          s.sheets = []; await this._reloadFood(); this._render(); this._toast("Entry deleted"); break;
         case "quickAdd": {
           const get = (k) => this.shadowRoot.querySelector(`[data-q="${k}"]`)?.value;
           if (!num(get("kcal")) && !num(get("protein")) && !num(get("carbs")) && !num(get("fat"))) { this._toast("Enter at least calories", true); break; }
           await this.ws("food/log", { entry: { date: s.day, meal: this._sheet.meal, name: get("name") || "Quick add", amount: 1, unit: "quick",
             kcal: num(get("kcal")) || 0, protein: num(get("protein")) || 0, carbs: num(get("carbs")) || 0, fat: num(get("fat")) || 0, remember: false } });
-          s.sheets = []; s.food = await this.ws("food/day", { date: s.day }); this._render(); this._toast("Added"); break;
+          s.sheets = []; await this._reloadFood(); this._render(); this._toast("Added"); break;
         }
         case "createCustomFood": {
           const get = (k) => this.shadowRoot.querySelector(`[data-c="${k}"]`)?.value;
@@ -981,7 +1306,13 @@ class HealthAssistantPanel extends HTMLElement {
         }
 
         /* profile */
-        case "openVital": this._openSheet(await this._sheetVitalData(d.type)); break;
+        case "openVital": {
+          const sh = { kind: "vital", type: d.type, list: null };
+          this._openSheet(sh);
+          sh.list = await this.ws("vitals/list", { vital_type: d.type, limit: 30 });
+          if (this._sheet === sh) this._renderSheet();
+          break;
+        }
         case "saveVital": {
           const sh = this._sheet, u = this._units;
           const get = (k) => this.shadowRoot.querySelector(`[data-v="${k}"]`)?.value;
@@ -1002,15 +1333,35 @@ class HealthAssistantPanel extends HTMLElement {
           await this._loadTab(); this._render(); break;
         }
         case "editProfile": this._openSheet({ kind: "profile" }); break;
+        case "editTargets": this._openSheet({ kind: "targets" }); this._updateMacroKcal(); break;
+        case "saveTargets": case "resetTargets": {
+          const keys = ["calorie_target_override", "protein_override_g", "carbs_override_g", "fat_override_g"];
+          const changes = {};
+          keys.forEach((k) => (changes[k] = action === "resetTargets" ? null : num(this.shadowRoot.querySelector(`[data-t="${k}"]`).value)));
+          await this.ws("profile/update", { changes });
+          s.sheets = []; await this._loadAll(); this._render(); this._toast(action === "resetTargets" ? "Using calculated targets" : "Targets saved"); break;
+        }
+        case "workoutSettings": {
+          const sh = { kind: "workoutSettings", targets: null };
+          this._openSheet(sh);
+          sh.targets = await this.ws("notify/targets");
+          if (this._sheet === sh) this._renderSheet();
+          break;
+        }
+        case "saveWorkoutSettings": {
+          const get = (k) => this.shadowRoot.querySelector(`[data-ws="${k}"]`).value;
+          await this.ws("profile/update", { changes: { rest_default_s: Number(get("rest_default_s")), live_activity_notify: get("live_activity_notify") || null } });
+          s.sheets = []; await this._refreshOverview(); this._render(); this._toast("Saved"); break;
+        }
         case "saveProfile": {
           const get = (k) => this.shadowRoot.querySelector(`[data-p="${k}"]`)?.value;
-          const units = get("units"), nu = new Units(this._units.imp ? "imperial" : "metric");
+          const nu = new Units(this._units.imp ? "imperial" : "metric");
           const changes = {
-            name: get("name"), units, sex: get("sex"), age: num(get("age")),
+            name: get("name"), units: get("units"), sex: get("sex"), age: num(get("age")),
             target_weight_kg: nu.wIn(get("target")), daily_steps: num(get("steps")), lifting_days: num(get("lift")),
             goal_rate_kg_week: nu.wIn(get("rate")),
           };
-          const curH = this._s.overview.latest.height?.value ?? this._s.overview.profile.height_cm;
+          const curH = s.overview.latest.height?.value ?? s.overview.profile.height_cm;
           const h = nu.imp ? ((num(get("ft")) || 0) * 12 + (num(get("in")) || 0)) * 2.54 : num(get("cm"));
           if (h && Math.abs(h - curH) > 0.6) changes.height_cm = Math.round(h * 10) / 10;
           await this.ws("profile/update", { changes });
@@ -1023,20 +1374,44 @@ class HealthAssistantPanel extends HTMLElement {
     }
   }
 
+  _updateMacroKcal() {
+    const el = this.shadowRoot.getElementById("macrokcal");
+    if (!el) return;
+    const e = this._s.overview.energy;
+    const auto = e.macros_auto || {};
+    const field = (k) => num(this.shadowRoot.querySelector(`[data-t="${k}"]`)?.value);
+    const kc = field("calorie_target_override") ?? e.target_auto;
+    const p = field("protein_override_g") ?? auto.protein_g;
+    const f = field("fat_override_g") ?? (field("calorie_target_override") ? kc * 0.25 / 9 : auto.fat_g);
+    const c = field("carbs_override_g");
+    el.textContent = c != null
+      ? `These macros add up to ${r0(p * 4 + c * 4 + f * 9)} kcal (target ${r0(kc)}).`
+      : `Carbs will fill the rest: about ${r0(Math.max(0, (kc - p * 4 - f * 9) / 4))} g.`;
+  }
+
   _onInput(e) {
     const t = e.target, d = t.dataset, s = this._s;
     if (d.set !== undefined && s.active) {
-      const x = s.active.exercises[+d.e].sets[+d.s];
+      const ex = s.active.exercises[+d.e];
+      const x = ex.sets[+d.s];
       const v = t.value;
       const u = this._units;
       if (d.set === "weight") x.weight = u.wIn(v);
-      else if (d.set === "reps") x.reps = v === "" ? null : parseInt(v, 10);
+      else if (d.set === "reps") {
+        x.reps = v === "" ? null : parseInt(v, 10);
+        x.autofill = false;
+        // Fill reps down into later sets that are still blank (or were filled this way).
+        ex.sets.forEach((y, j) => {
+          if (j <= +d.s || y.completed || y.type === "warmup" || !(y.reps == null || y.autofill)) return;
+          y.reps = x.reps; y.autofill = x.reps != null;
+          const inp = this.shadowRoot.querySelector(`input[data-set="reps"][data-e="${d.e}"][data-s="${j}"]`);
+          if (inp) inp.value = x.reps ?? "";
+        });
+      }
       else if (d.set === "duration_s") x.duration_s = v === "" ? null : parseInt(v, 10);
       else if (d.set === "minutes") x.duration_s = v === "" ? null : Math.round(Number(v) * 60);
       else if (d.set === "distance") x.distance_m = u.dIn(v);
       this._queueWorkoutSave();
-    } else if (d.exnote !== undefined && s.active) {
-      s.active.exercises[+d.exnote].notes = t.value; this._queueWorkoutSave();
     } else if (d.wfield && s.active) {
       s.active[d.wfield] = t.value; this._queueWorkoutSave();
     } else if (d.input === "foodSearch") {
@@ -1055,13 +1430,12 @@ class HealthAssistantPanel extends HTMLElement {
       const sh = this._sheet; sh.amount = t.value;
       this.shadowRoot.getElementById("nutri").innerHTML = this._nutriHtml(portion(sh.food, sh.amount, sh.unit));
     } else if (d.input === "exSearch") {
-      const sh = this._sheet; sh.query = t.value;
-      const pos = t.selectionStart;
-      this._renderSheet();
-      const inp = this.shadowRoot.getElementById("exq"); inp.focus(); inp.setSelectionRange(pos, pos);
+      this._sheet.query = t.value;
+      this.shadowRoot.getElementById("exlist").innerHTML = this._pickerList(this._sheet);
     } else if (d.tplreps !== undefined) {
-      const ex = this._sheet.tpl.exercises[+d.tplreps];
-      ex.sets.forEach((x) => { if (x.type !== "warmup") x.reps = num(t.value); });
+      this._sheet.tpl.exercises[+d.tplreps].sets.forEach((x) => { if (x.type !== "warmup") x.reps = num(t.value); });
+    } else if (d.t !== undefined) {
+      this._updateMacroKcal();
     }
   }
 
@@ -1072,11 +1446,9 @@ class HealthAssistantPanel extends HTMLElement {
 
   async _onChange(e) {
     const t = e.target, d = t.dataset, s = this._s;
-    if (d.set === "rpe" && s.active) { s.active.exercises[+d.e].sets[+d.s].rpe = num(t.value); this._queueWorkoutSave(); }
-    else if (d.change === "portionUnit") {
-      const sh = this._sheet, old = sh.unit, f = sh.food;
-      // Convert the amount so the portion stays the same size when switching units.
-      const g = portion(f, sh.amount, old).grams;
+    if (d.change === "portionUnit") {
+      const sh = this._sheet, f = sh.food;
+      const g = portion(f, sh.amount, sh.unit).grams;
       if (g) sh.amount = t.value === "g" ? Math.round(g) : t.value === "oz" ? Math.round((g / OZ_G) * 10) / 10 : Math.round((g / (f.serving_g || 100)) * 100) / 100;
       sh.unit = t.value; this._renderSheet();
     } else if (d.change === "portionMeal") this._sheet.meal = t.value;
@@ -1088,21 +1460,7 @@ class HealthAssistantPanel extends HTMLElement {
   }
 }
 
-/* ------------------------------------------------------------ small utils */
-/* Match a set to last time's set of the same kind (nth warm-up ↔ nth warm-up, nth work set ↔ nth work set). */
-function prevFor(last, sets, i) {
-  if (!last || !last.length) return null;
-  const warm = (x) => x.type === "warmup";
-  const isWarm = warm(sets[i]);
-  const n = sets.slice(0, i).filter((x) => warm(x) === isWarm).length;
-  return last.filter((x) => warm(x) === isWarm)[n] || null;
-}
-function prCount(w) { return new Set((w.prs || []).map((p) => p.exercise_id)).size; }
-function rid() { return Math.random().toString(16).slice(2, 14); }
-function blankSet(prev) {
-  return { id: rid(), type: prev?.type === "warmup" ? "working" : prev?.type || "working", weight: prev?.weight ?? null, reps: prev?.reps ?? null, rpe: null, duration_s: prev?.duration_s ?? null, distance_m: prev?.distance_m ?? null, completed: false };
-}
-
+/* ------------------------------------------------------------- charts */
 function ringChart(value, target) {
   const R = 52, C = 2 * Math.PI * R;
   const pct = target ? Math.min(1, value / target) : 0;
@@ -1128,146 +1486,216 @@ function lineChart(pts) {
 
 /* ================================================================= styles */
 const STYLES = `
-:host { display:block; height:100%; --hp-accent: var(--primary-color, #03a9f4); --hp-good:#43a047; --hp-warn:#fb8c00; --hp-bad: var(--error-color, #db4437);
+:host { display:block; height:100%; --hp-accent: var(--primary-color, #03a9f4); --hp-good:#34c759; --hp-bad: var(--error-color, #ff3b30);
   --hp-card: var(--ha-card-background, var(--card-background-color, #fff)); --hp-text: var(--primary-text-color, #212121); --hp-muted: var(--secondary-text-color, #727272);
-  --hp-line: var(--divider-color, rgba(0,0,0,.12)); --hp-bg: var(--primary-background-color, #f5f5f5); --hp-radius: var(--ha-card-border-radius, 14px);
-  color: var(--hp-text); font-family: var(--paper-font-body1_-_font-family, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif); -webkit-tap-highlight-color: transparent; }
+  --hp-line: var(--divider-color, rgba(0,0,0,.12)); --hp-bg: var(--primary-background-color, #f2f2f7); --hp-fill: color-mix(in srgb, var(--hp-text) 6%, transparent);
+  --hp-radius: 14px; --warm:#f5b400; --drop:#8e5cd9; --fail:#ff3b30;
+  color: var(--hp-text); font: 15px/1.35 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif; -webkit-tap-highlight-color: transparent; -webkit-text-size-adjust:100%; }
 * { box-sizing:border-box; }
-button { font:inherit; color:inherit; background:none; border:0; cursor:pointer; padding:0; }
-input, select, textarea { font:inherit; font-size:16px; color:var(--hp-text); background:var(--hp-bg); border:1px solid var(--hp-line); border-radius:10px; padding:10px 12px; width:100%; }
-input:focus, select:focus, textarea:focus { outline:2px solid var(--hp-accent); outline-offset:-1px; }
+button { font:inherit; color:inherit; background:none; border:0; cursor:pointer; padding:0; touch-action:manipulation; }
+input, select, textarea { font:inherit; font-size:16px; color:var(--hp-text); background:var(--hp-fill); border:1px solid transparent; border-radius:10px; padding:10px 12px; width:100%; }
+input:focus, select:focus, textarea:focus { outline:none; border-color:var(--hp-accent); background:var(--hp-card); }
+input::placeholder { color:var(--hp-muted); opacity:.7; }
 ha-icon { --mdc-icon-size: 20px; display:inline-flex; vertical-align:middle; }
-h2 { margin:0 0 4px; font-size:1.3rem; } h3 { margin:16px 0 8px; font-size:1rem; }
-.app { display:flex; flex-direction:column; height:100%; background:var(--hp-bg); position:relative; overflow:hidden; }
-.top { display:flex; align-items:center; gap:8px; padding:0 12px; height:56px; flex:0 0 auto; background:var(--app-header-background-color, var(--hp-card)); color:var(--app-header-text-color, var(--hp-text)); border-bottom:1px solid var(--hp-line); padding-top:env(safe-area-inset-top); box-sizing:content-box; }
-.title { display:flex; align-items:center; gap:8px; font-size:1.25rem; font-weight:500; }
-.brand { color:var(--hp-accent); --mdc-icon-size:24px; }
-.narrow .brand { color: inherit; }
+h1 { font-size:1.9rem; font-weight:700; margin:0; letter-spacing:-.02em; }
+h2 { margin:0 0 4px; font-size:1.25rem; font-weight:650; } h3 { margin:14px 0 8px; font-size:1rem; font-weight:600; }
+
+/* ---------- shell ---------- */
+.app { display:flex; flex-direction:column; height:100vh; height:100dvh; background:var(--hp-bg); position:relative; overflow:hidden; }
+main { flex:1 1 auto; min-height:0; overflow-y:auto; -webkit-overflow-scrolling:touch; overscroll-behavior-y:contain; }
+.wrap { max-width:720px; margin:0 auto; padding:16px 16px 28px; }
+.wrap.widewrap { max-width:1180px; }
+.narrow .wrap { padding:calc(10px + env(safe-area-inset-top)) 12px 20px; }
+.top { display:flex; align-items:center; gap:8px; padding:0 16px; height:56px; flex:0 0 auto; background:var(--app-header-background-color, var(--hp-card)); color:var(--app-header-text-color, var(--hp-text)); border-bottom:1px solid var(--hp-line); }
+.narrow .top { display:none; }
+.title { display:flex; align-items:center; gap:8px; font-size:1.2rem; font-weight:500; }
+.brand { --mdc-icon-size:24px; }
 .spacer { flex:1; }
-.profilesel { width:auto; padding:6px 10px; font-size:14px; background:transparent; color:inherit; }
-main { flex:1 1 auto; overflow-y:auto; -webkit-overflow-scrolling:touch; overscroll-behavior:contain; }
-.wrap { max-width:760px; margin:0 auto; padding:16px 12px 32px; }
+.profilesel { width:auto; padding:6px 28px 6px 10px; font-size:14px; }
+.top .profilesel { background:transparent; color:inherit; border:1px solid color-mix(in srgb, currentColor 30%, transparent); }
 .topnav { display:flex; gap:4px; margin-left:24px; }
-.narrow .topnav { display:none; }
-.wide .bottomnav { display:none; }
-.topnav .navbtn { display:flex; align-items:center; gap:6px; padding:8px 14px; border-radius:20px; color:var(--hp-muted); }
-.topnav .navbtn.on { background:color-mix(in srgb, var(--hp-accent) 15%, transparent); color:var(--hp-accent); }
-.topnav .navbtn.center { background:var(--hp-accent); color:var(--text-primary-color, #fff); }
-.bottomnav { flex:0 0 auto; display:grid; grid-template-columns:repeat(4,1fr); background:var(--hp-card); border-top:1px solid var(--hp-line); padding-bottom:env(safe-area-inset-bottom); }
-.bottomnav .navbtn { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:2px; padding:6px 0 8px; min-height:56px; color:var(--hp-muted); font-size:11px; }
-.bottomnav .navbtn ha-icon { --mdc-icon-size:24px; }
+.topnav .navbtn { display:flex; align-items:center; gap:6px; padding:7px 14px; border-radius:18px; opacity:.75; }
+.topnav .navbtn:hover { opacity:1; background:color-mix(in srgb, currentColor 10%, transparent); }
+.topnav .navbtn.on { opacity:1; background:color-mix(in srgb, currentColor 16%, transparent); font-weight:600; }
+.topnav .navbtn.center { opacity:1; background:var(--hp-accent); color:var(--text-primary-color,#fff); }
+.pagehead { display:none; align-items:center; justify-content:space-between; gap:8px; margin:6px 4px 12px; }
+.narrow .pagehead { display:flex; }
+
+/* bottom tab bar (phones) */
+.bottomnav { display:none; flex:0 0 auto; grid-template-columns:repeat(5,1fr); align-items:end;
+  background:color-mix(in srgb, var(--hp-card) 92%, transparent); -webkit-backdrop-filter:saturate(180%) blur(20px); backdrop-filter:saturate(180%) blur(20px);
+  border-top:.5px solid var(--hp-line); padding:4px 0 max(6px, env(safe-area-inset-bottom)); }
+.narrow .bottomnav { display:grid; }
+.bottomnav .navbtn { display:flex; flex-direction:column; align-items:center; gap:2px; padding:2px 0; color:var(--hp-muted); font-size:10px; font-weight:500; min-height:46px; justify-content:flex-end; }
+.bottomnav .navbtn ha-icon { --mdc-icon-size:25px; }
 .bottomnav .navbtn.on { color:var(--hp-accent); }
-.bottomnav .navbtn.center .navicon { width:40px; height:40px; border-radius:50%; background:var(--hp-accent); color:var(--text-primary-color,#fff); display:flex; align-items:center; justify-content:center; box-shadow:0 2px 8px color-mix(in srgb, var(--hp-accent) 45%, transparent); }
-.bottomnav .navbtn.center.on .navlabel { color:var(--hp-accent); font-weight:600; }
-.card { display:block; width:100%; text-align:left; background:var(--hp-card); border-radius:var(--hp-radius); padding:14px; margin-bottom:12px; box-shadow:var(--ha-card-box-shadow, 0 1px 3px rgba(0,0,0,.08)); border:var(--ha-card-border-width,1px) solid var(--ha-card-border-color, var(--hp-line)); }
+.bottomnav .navbtn.center .navicon { width:44px; height:44px; margin-top:-10px; border-radius:50%; background:var(--hp-accent); color:var(--text-primary-color,#fff); display:flex; align-items:center; justify-content:center; box-shadow:0 3px 10px color-mix(in srgb, var(--hp-accent) 40%, transparent); }
+.bottomnav .navbtn.center ha-icon { --mdc-icon-size:26px; }
+.bottomnav .navbtn.center .navlabel { font-variant-numeric:tabular-nums; }
+.navlabel { white-space:nowrap; }
+
+/* ---------- common ---------- */
+.card { display:block; width:100%; text-align:left; background:var(--hp-card); border-radius:var(--hp-radius); padding:14px; margin-bottom:12px; box-shadow:var(--ha-card-box-shadow, none); border:var(--ha-card-border-width,1px) solid var(--ha-card-border-color, var(--hp-line)); }
 .card.empty { text-align:center; padding:28px 16px; } .card.empty p { color:var(--hp-muted); }
-.card.warn { border-color:var(--hp-warn); color:var(--hp-warn); }
+.card.warn { border-color:#ff9500; color:#c46a00; }
 .empty { text-align:center; color:var(--hp-muted); padding:24px; }
 .bigicon { --mdc-icon-size:44px; color:var(--hp-accent); margin-bottom:6px; }
 .row { display:flex; align-items:center; gap:8px; } .between { justify-content:space-between; }
-.muted { color:var(--hp-muted); } .small { font-size:.85rem; } .xsmall { font-size:.72rem; } .center { text-align:center; }
-.big { font-size:1.5rem; font-weight:600; line-height:1.15; } .big small { font-size:.9rem; font-weight:400; color:var(--hp-muted); }
+.muted { color:var(--hp-muted); } .small { font-size:.85rem; } .xsmall { font-size:.72rem; } .center { text-align:center; } .right { text-align:right; }
+.big { font-size:1.45rem; font-weight:650; line-height:1.15; font-variant-numeric:tabular-nums; } .big small { font-size:.85rem; font-weight:400; color:var(--hp-muted); }
 .accent { color:var(--hp-accent); }
-.section { margin:18px 4px 8px; }
-.btn { display:inline-flex; align-items:center; justify-content:center; gap:6px; padding:10px 16px; border-radius:22px; background:var(--hp-bg); border:1px solid var(--hp-line); font-weight:500; min-height:42px; }
-.btn.primary { background:var(--hp-accent); color:var(--text-primary-color,#fff); border-color:transparent; }
-.btn.danger { color:var(--hp-bad); } .btn.danger:not(.ghost) { border-color:var(--hp-bad); }
-.btn.ghost { background:transparent; border-color:transparent; color:var(--hp-accent); } .btn.ghost.danger { color:var(--hp-bad); }
-.btn.full { width:100%; margin-top:8px; } .btn.big { min-height:50px; font-size:1.05rem; } .btn.sm { padding:4px 10px; min-height:30px; font-size:.85rem; }
+.section { margin:20px 4px 8px; } .row.section h3 { margin:0; }
+.btn { display:inline-flex; align-items:center; justify-content:center; gap:6px; padding:9px 16px; border-radius:12px; background:var(--hp-fill); font-weight:600; min-height:42px; }
+.btn.primary { background:var(--hp-accent); color:var(--text-primary-color,#fff); }
+.btn.soft { background:var(--hp-fill); color:var(--hp-text); }
+.btn.danger { color:var(--hp-bad); }
+.btn.ghost { background:transparent; color:var(--hp-accent); } .btn.ghost.danger { color:var(--hp-bad); }
+.btn.full { width:100%; margin-top:8px; } .btn.big { min-height:50px; font-size:1.02rem; } .btn.sm { padding:4px 12px; min-height:32px; font-size:.85rem; border-radius:16px; }
 .iconbtn { width:40px; height:40px; border-radius:50%; display:inline-flex; align-items:center; justify-content:center; flex:0 0 auto; }
-.iconbtn:hover { background:color-mix(in srgb, var(--hp-text) 8%, transparent); }
-.iconbtn.sm { width:32px; height:32px; } .iconbtn.xs { width:26px; height:26px; } .iconbtn.xs ha-icon { --mdc-icon-size:16px; }
+.iconbtn:active, .iconbtn:hover { background:var(--hp-fill); }
+.iconbtn.sm { width:32px; height:32px; }
 .iconbtn[disabled] { opacity:.3; }
 .linklike { text-align:left; }
-.seg { display:flex; background:var(--hp-card); border:1px solid var(--hp-line); border-radius:22px; padding:3px; margin-bottom:14px; }
-.seg button { flex:1; padding:8px; border-radius:18px; color:var(--hp-muted); font-weight:500; }
-.seg button.on { background:var(--hp-accent); color:var(--text-primary-color,#fff); }
-.month { margin:18px 4px 8px; color:var(--hp-muted); font-weight:500; font-size:.9rem; text-transform:uppercase; letter-spacing:.04em; }
+.seg { display:flex; background:var(--hp-fill); border-radius:10px; padding:2px; margin-bottom:14px; }
+.seg button { flex:1; padding:7px; border-radius:8px; color:var(--hp-text); font-weight:500; font-size:.9rem; }
+.seg button.on { background:var(--hp-card); box-shadow:0 1px 3px rgba(0,0,0,.12); font-weight:600; }
+.badge { display:inline-flex; align-items:center; gap:4px; padding:2px 8px; border-radius:10px; font-size:.72rem; font-weight:600; }
+.badge ha-icon { --mdc-icon-size:14px; } .gold { background:#fff3cd; color:#8a6d00; } .blue { background:color-mix(in srgb, var(--hp-accent) 15%, transparent); color:var(--hp-accent); }
+
+/* history */
+.month { margin:18px 4px 8px; color:var(--hp-muted); font-weight:600; font-size:.78rem; text-transform:uppercase; letter-spacing:.05em; }
 .stats { display:flex; gap:14px; margin:8px 0; font-size:.85rem; color:var(--hp-muted); flex-wrap:wrap; } .stats ha-icon { --mdc-icon-size:16px; }
-.stats.big { font-size:1rem; color:var(--hp-text); margin:12px 0; }
+.stats.big { font-size:1rem; color:var(--hp-text); margin:12px 0; font-weight:500; }
 .exline { display:flex; justify-content:space-between; font-size:.9rem; padding:2px 0; gap:8px; }
-.badge { display:inline-flex; align-items:center; gap:4px; padding:2px 8px; border-radius:12px; font-size:.75rem; font-weight:600; }
-.badge ha-icon { --mdc-icon-size:14px; } .gold { background:#fff3cd; color:#8a6d00; }
 .recgrid { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin-top:10px; } .recval { font-weight:600; }
 .prs { background:#fff8e1; color:#6d5300; border-radius:10px; padding:8px 12px; margin:8px 0; } .pr { padding:3px 0; } .pr ha-icon { --mdc-icon-size:16px; color:#f9a825; }
 .detailex { margin:14px 0; }
-.settable { width:100%; border-collapse:collapse; margin-top:6px; } .settable td { padding:5px 4px; border-top:1px solid var(--hp-line); }
-.setbadge { display:inline-flex; width:26px; height:26px; border-radius:8px; align-items:center; justify-content:center; font-weight:700; font-size:.85rem; background:var(--hp-bg); }
-.setbadge.warm { background:#fff3e0; color:#e65100; } .setbadge.fail { background:#ffebee; color:#c62828; } .setbadge.drop { background:#ede7f6; color:#4527a0; }
+.settable { width:100%; border-collapse:collapse; margin-top:6px; } .settable td { padding:6px 4px; border-top:1px solid var(--hp-line); }
+.setbadge { display:inline-flex; min-width:28px; height:28px; padding:0 4px; border-radius:8px; align-items:center; justify-content:center; font-weight:700; font-size:.9rem; background:var(--hp-fill); font-variant-numeric:tabular-nums; }
+.setbadge.warm { background:color-mix(in srgb, var(--warm) 22%, transparent); color:#a77a00; }
+.setbadge.drop { background:color-mix(in srgb, var(--drop) 20%, transparent); color:var(--drop); }
+.setbadge.fail { background:color-mix(in srgb, var(--fail) 18%, transparent); color:var(--fail); }
 .actions { display:flex; gap:8px; justify-content:flex-end; margin-top:16px; flex-wrap:wrap; }
 .histrow { padding:8px 0; border-top:1px solid var(--hp-line); }
 .hero { text-align:center; padding:24px 16px; }
 .tpl .btn { margin-top:10px; }
-/* active workout */
-.activehead { position:sticky; top:0; z-index:2; }
-.wname { font-size:1.2rem; font-weight:600; background:transparent; border-color:transparent; padding:4px 0; margin-bottom:6px; }
-.wname:focus { border-color:var(--hp-line); padding:4px 8px; }
-.timer { font-variant-numeric:tabular-nums; font-size:1.1rem; color:var(--hp-accent); font-weight:600; }
-.exercise .note { margin:6px 0 8px; padding:6px 10px; font-size:14px; background:transparent; border-style:dashed; }
-.sethead, .setrow { display:grid; grid-template-columns: 28px minmax(40px,1fr) 62px 46px 46px 38px 22px; gap:5px; align-items:center; }
-.sethead.k-duration, .setrow.k-duration { grid-template-columns: 28px minmax(40px,1fr) 100px 46px 38px 22px; }
-.sethead { font-size:.72rem; color:var(--hp-muted); text-transform:uppercase; letter-spacing:.03em; padding:0 2px 4px; }
-.setrow { padding:4px 2px; border-radius:10px; transition:background .15s; }
-.setrow.done { background:color-mix(in srgb, var(--hp-good) 16%, transparent); }
-.setrow .prev { font-size:.8rem; color:var(--hp-muted); text-align:left; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-.cell { padding:8px 4px; text-align:center; border-radius:8px; min-width:0; }
-select.cell { padding:8px 0; -webkit-appearance:none; appearance:none; text-align-last:center; }
-.check { width:40px; height:36px; border-radius:8px; background:var(--hp-bg); border:1px solid var(--hp-line); display:flex; align-items:center; justify-content:center; color:var(--hp-muted); }
-.check.on { background:var(--hp-good); color:#fff; border-color:transparent; }
-.setrow .del { color:var(--hp-muted); }
+.demo { display:block; width:100%; max-height:320px; object-fit:contain; border-radius:12px; background:#fff; margin:12px 0; }
+.steps { padding-left:20px; margin:0; } .steps li { margin:4px 0; }
+
+/* ---------- active workout ---------- */
+.activehead { position:sticky; top:calc(-10px - env(safe-area-inset-top)); z-index:3; background:var(--hp-bg); padding:4px 4px 10px; margin:0 -4px 4px; }
+.wide .activehead { top:-16px; }
+.wname { font-size:1.6rem; font-weight:700; background:transparent; border:0; padding:2px 0; letter-spacing:-.01em; }
+.wname:focus { background:var(--hp-fill); padding:2px 8px; }
+.timer { font-variant-numeric:tabular-nums; font-size:1.05rem; color:var(--hp-accent); font-weight:600; }
+.exercise { padding:12px 10px 8px; }
+.exercise.ss { border-left:4px solid var(--ssc); } .ss0 { --ssc:#ff9500; } .ss1 { --ssc:#34c759; } .ss2 { --ssc:#af52de; } .ss3 { --ssc:#ff2d55; }
+.exhead { display:flex; align-items:center; justify-content:space-between; gap:6px; padding-left:4px; }
+.extitle { font-size:1.05rem; font-weight:650; color:var(--hp-accent); text-align:left; }
+.exmeta { display:flex; gap:10px; align-items:center; font-size:.78rem; color:var(--hp-muted); padding:0 4px 8px; } .exmeta ha-icon { --mdc-icon-size:14px; }
+.sstag { background:color-mix(in srgb, var(--ssc) 18%, transparent); color:var(--ssc); font-weight:700; padding:1px 7px; border-radius:6px; }
+.sethead, .setrow { display:grid; grid-template-columns: 36px minmax(0,1fr) 68px 56px 44px; gap:8px; align-items:center; }
+.sethead.k-duration, .setrow.k-duration { grid-template-columns: 36px minmax(0,1fr) 132px 44px; }
+.sethead { font-size:.72rem; font-weight:600; color:var(--hp-muted); text-transform:uppercase; letter-spacing:.03em; padding:0 4px 4px; text-align:center; }
+.sethead span:nth-child(2) { text-align:left; } .sethead ha-icon { --mdc-icon-size:16px; }
+.setrow { padding:4px; border-radius:10px; margin-bottom:2px; transition:background .2s; }
+.setrow.done { background:color-mix(in srgb, var(--hp-good) 18%, transparent); }
+.setbtn { display:flex; justify-content:center; }
+.setrow .prev { font-size:.85rem; color:var(--hp-muted); text-align:left; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-variant-numeric:tabular-nums; min-height:36px; }
+.cell { padding:7px 4px; text-align:center; border-radius:8px; min-width:0; font-weight:600; font-variant-numeric:tabular-nums; }
+.setrow.done .cell { background:transparent; }
+.check { width:44px; height:36px; border-radius:8px; background:var(--hp-fill); display:flex; align-items:center; justify-content:center; color:var(--hp-muted); position:relative; }
+.check.on { background:var(--hp-good); color:#fff; }
+.check .rpe { position:absolute; top:-6px; right:-6px; background:var(--hp-card); color:var(--hp-text); border:1px solid var(--hp-line); border-radius:8px; font-size:.65rem; font-weight:700; padding:0 4px; line-height:14px; }
 .wnotes { margin-top:12px; min-height:70px; }
-.restbar { position:relative; overflow:hidden; display:flex; align-items:center; justify-content:space-between; gap:8px; padding:8px 12px; background:var(--hp-card); border-top:1px solid var(--hp-line); font-weight:600; font-variant-numeric:tabular-nums; }
-.restfill { position:absolute; inset:0 auto 0 0; background:color-mix(in srgb, var(--hp-accent) 18%, transparent); z-index:0; transition:width 1s linear; }
-.restbar > * { position:relative; z-index:1; } .restbar > span { white-space:nowrap; }
-/* nutrition */
-.datenav { display:flex; align-items:center; justify-content:center; gap:16px; margin-bottom:10px; }
+.restbar { position:relative; overflow:hidden; display:flex; align-items:center; justify-content:space-between; gap:8px; padding:8px 12px; background:var(--hp-card); border-top:.5px solid var(--hp-line); font-variant-numeric:tabular-nums; }
+.restfill { position:absolute; inset:0 auto 0 0; background:color-mix(in srgb, var(--hp-accent) 16%, transparent); transition:width 1s linear; }
+.restbar > * { position:relative; } .restlabel { white-space:nowrap; } .restlabel b { font-size:1.1rem; }
+
+/* ---------- nutrition ---------- */
+.wide .widewrap .cols { display:grid; grid-template-columns:minmax(0,1.35fr) minmax(300px,1fr); gap:20px; align-items:start; }
+.wide .widewrap .colside { position:sticky; top:0; }
+.datenav { display:flex; align-items:center; justify-content:center; gap:16px; margin-bottom:8px; }
 .summary { display:flex; gap:16px; align-items:center; }
-.ringwrap { position:relative; width:128px; height:128px; flex:0 0 auto; }
-.ring { width:100%; height:100%; } .ringbg { fill:none; stroke:var(--hp-bg); stroke-width:11; }
+.ringwrap { position:relative; width:124px; height:124px; flex:0 0 auto; }
+.ring { width:100%; height:100%; } .ringbg { fill:none; stroke:var(--hp-fill); stroke-width:11; }
 .ringfg { fill:none; stroke:var(--hp-accent); stroke-width:11; stroke-linecap:round; transition:stroke-dashoffset .4s; } .ringfg.over { stroke:var(--hp-bad); }
 .ringtext { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; }
-.sumright { flex:1; display:flex; flex-direction:column; gap:6px; min-width:0; }
-.bar { height:8px; background:var(--hp-bg); border-radius:4px; overflow:hidden; margin:4px 0; }
+.sumright { flex:1; display:flex; flex-direction:column; gap:5px; min-width:0; }
+.bar { height:7px; background:var(--hp-fill); border-radius:4px; overflow:hidden; margin:3px 0; }
 .fill { height:100%; border-radius:4px; background:var(--hp-accent); transition:width .4s; }
-.fill.p { background:#e53935; } .fill.c { background:#fb8c00; } .fill.f { background:#8e24aa; }
+.fill.p { background:#ff3b30; } .fill.c { background:#ff9500; } .fill.f { background:#af52de; }
 .meal h3 { margin:0; }
 .foodrow { display:flex; width:100%; justify-content:space-between; align-items:center; gap:10px; text-align:left; padding:10px 2px; border-top:1px solid var(--hp-line); }
-.foodrow > div { min-width:0; } .foodrow .kcal { font-weight:600; white-space:nowrap; }
-.searchbox { display:flex; align-items:center; gap:6px; background:var(--hp-bg); border:1px solid var(--hp-line); border-radius:12px; padding:0 10px; margin-bottom:8px; }
-.searchbox input { border:0; background:transparent; padding:12px 4px; } .searchbox input:focus { outline:none; }
+.foodrow > div { min-width:0; } .foodrow .kcal { font-weight:600; white-space:nowrap; font-variant-numeric:tabular-nums; }
+.avg { width:100%; border-collapse:collapse; font-variant-numeric:tabular-nums; }
+.avg th, .avg td { padding:7px 4px; text-align:right; border-top:1px solid var(--hp-line); }
+.avg thead th { border-top:0; font-size:.75rem; color:var(--hp-muted); font-weight:600; }
+.avg tbody th { text-align:left; font-weight:500; }
+.avg td { font-weight:600; }
+.bars { padding-bottom:18px; }
+.plot { position:relative; display:flex; align-items:flex-end; gap:4px; height:130px; }
+.bcol { flex:1; height:100%; display:flex; flex-direction:column; justify-content:flex-end; align-items:center; position:relative; }
+.bcol span { position:absolute; bottom:-18px; font-size:.65rem; color:var(--hp-muted); }
+.bbar { width:100%; max-width:22px; background:color-mix(in srgb, var(--hp-accent) 50%, transparent); border-radius:4px 4px 2px 2px; min-height:2px; }
+.bbar.today { background:var(--hp-accent); } .bbar.over { background:#ff9500; }
+.tline { position:absolute; left:0; right:0; border-top:1.5px dashed var(--hp-muted); opacity:.7; z-index:1; pointer-events:none; }
+.tline span { position:absolute; right:0; top:-15px; font-size:.65rem; color:var(--hp-muted); }
+.minitiles { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+.searchbox { display:flex; align-items:center; gap:6px; background:var(--hp-fill); border-radius:10px; padding:0 10px; margin-bottom:8px; }
+.searchbox input { border:0; background:transparent; padding:10px 4px; } .searchbox input:focus { background:transparent; border:0; }
 .portion { display:flex; gap:8px; margin:14px 0; } .portion .amount { width:110px; flex:0 0 auto; font-size:1.2rem; text-align:center; font-weight:600; }
-.nutri { display:grid; grid-template-columns:repeat(4,1fr); text-align:center; background:var(--hp-bg); border-radius:12px; padding:12px 4px; margin-bottom:12px; }
+.nutri { display:grid; grid-template-columns:repeat(4,1fr); text-align:center; background:var(--hp-fill); border-radius:12px; padding:12px 4px; margin-bottom:12px; }
 .nutri .big { font-size:1.2rem; }
 .form { display:flex; flex-direction:column; gap:10px; margin:10px 0; }
-.form label, label.inline { display:flex; flex-direction:column; gap:4px; font-size:.85rem; color:var(--hp-muted); }
+.form label, label.inline { display:flex; flex-direction:column; gap:4px; font-size:.82rem; color:var(--hp-muted); font-weight:500; }
 label.inline { flex-direction:row; align-items:center; gap:8px; } label.inline select, label.inline input { width:auto; }
-.grid2 { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
-/* profile */
+.grid2 { display:grid; grid-template-columns:1fr 1fr; gap:10px; } .grid3 { display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px; }
+
+/* ---------- profile ---------- */
 .weights { display:flex; align-items:center; justify-content:space-around; margin:14px 0 8px; text-align:center; }
 .chart { width:100%; height:110px; margin:10px 0 4px; } .chart .line { fill:none; stroke:var(--hp-accent); stroke-width:2.5; vector-effect:non-scaling-stroke; }
 .chart .area { fill:color-mix(in srgb, var(--hp-accent) 14%, transparent); } .chart .dot { fill:var(--hp-accent); } .chart .lbl { font-size:10px; fill:var(--hp-muted); }
 .tiles { display:grid; grid-template-columns:repeat(auto-fill, minmax(150px,1fr)); gap:10px; }
+.narrow .tiles { grid-template-columns:1fr 1fr; }
 .tile { background:var(--hp-card); border-radius:var(--hp-radius); padding:12px; text-align:left; border:1px solid var(--hp-line); display:flex; flex-direction:column; gap:2px; }
-.tile ha-icon { color:var(--hp-accent); margin-bottom:4px; } .tileval { font-size:1.15rem; font-weight:600; }
-.egrid { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin:6px 0 10px; }
+.tile ha-icon { color:var(--hp-accent); margin-bottom:4px; } .tileval { font-size:1.12rem; font-weight:650; }
+.egrid { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin:4px 0 10px; }
+.card.list { padding:0 14px; }
+.listrow { display:grid; grid-template-columns:24px 1fr auto 20px; align-items:center; gap:10px; width:100%; padding:13px 0; text-align:left; }
+.listrow + .listrow { border-top:1px solid var(--hp-line); } .listrow > ha-icon:first-child { color:var(--hp-accent); }
+
 /* template / picker */
 .tplex { border-top:1px solid var(--hp-line); padding:10px 0; } .tplrow { flex-wrap:wrap; margin-top:6px; } .tplrow .cell { width:56px; }
-.chips { display:flex; gap:6px; overflow-x:auto; padding-bottom:6px; margin-bottom:4px; scrollbar-width:none; }
-.chip { padding:6px 12px; border-radius:16px; border:1px solid var(--hp-line); white-space:nowrap; font-size:.85rem; }
-.chip.on { background:var(--hp-accent); color:var(--text-primary-color,#fff); border-color:transparent; }
-.newex { margin-top:12px; } .newex summary { color:var(--hp-accent); cursor:pointer; padding:8px 0; }
-/* sheet */
-.scrim { position:absolute; inset:0; background:rgba(0,0,0,.4); z-index:10; animation:fade .15s; }
-.sheet { position:absolute; left:0; right:0; bottom:0; max-height:92%; z-index:11; background:var(--hp-card); border-radius:18px 18px 0 0; display:flex; flex-direction:column; animation:up .22s ease-out; padding-bottom:env(safe-area-inset-bottom); }
-.wide .sheet { left:50%; right:auto; bottom:auto; top:50%; transform:translate(-50%,-50%); width:min(560px, 94%); max-height:86%; border-radius:18px; animation:fade .15s; }
-.grab { width:40px; height:5px; border-radius:3px; background:var(--hp-line); margin:8px auto 0; } .wide .grab { display:none; }
-.sheet .close { position:absolute; top:8px; right:8px; }
-.sheetbody { overflow-y:auto; padding:12px 16px 20px; -webkit-overflow-scrolling:touch; }
-.sheetbody h2 { padding-right:40px; }
+.chips { display:flex; gap:6px; overflow-x:auto; padding-bottom:6px; margin-bottom:4px; scrollbar-width:none; } .chips::-webkit-scrollbar { display:none; }
+.chip { padding:6px 12px; border-radius:16px; background:var(--hp-fill); white-space:nowrap; font-size:.85rem; font-weight:500; }
+.chip.on { background:var(--hp-accent); color:var(--text-primary-color,#fff); }
+.newex { margin-top:12px; } .newex summary { color:var(--hp-accent); cursor:pointer; padding:8px 0; font-weight:600; }
+
+/* ---------- sheets (fixed to the screen, slide up like iOS) ---------- */
+.scrim { position:fixed; inset:0; background:rgba(0,0,0,.35); z-index:50; animation:fade .2s; }
+.sheet { position:fixed; left:0; right:0; bottom:0; max-height:calc(100dvh - 44px - env(safe-area-inset-top)); z-index:51; background:var(--hp-card); border-radius:16px 16px 0 0; display:flex; flex-direction:column; box-shadow:0 -4px 30px rgba(0,0,0,.18); }
+.sheet.anim { animation:up .3s cubic-bezier(.2,.9,.3,1); }
+.wide .sheet { left:50%; right:auto; bottom:auto; top:50%; transform:translate(-50%,-50%); width:min(560px, 92vw); max-height:86vh; border-radius:16px; }
+.wide .sheet.anim { animation:pop .18s ease-out; }
+.grabzone { padding:8px 0 4px; flex:0 0 auto; touch-action:none; } .grab { width:38px; height:5px; border-radius:3px; background:var(--hp-line); margin:0 auto; } .wide .grabzone { display:none; }
+.sheet .close { position:absolute; top:10px; right:10px; background:var(--hp-fill); width:30px; height:30px; } .sheet .close ha-icon { --mdc-icon-size:18px; }
+.sheetbody { overflow-y:auto; padding:6px 16px calc(20px + env(safe-area-inset-bottom)); -webkit-overflow-scrolling:touch; overscroll-behavior:contain; }
+.wide .sheetbody { padding:20px; }
+.sheetbody > h2:first-child { padding-right:40px; }
+.menu { display:flex; flex-direction:column; margin-top:10px; background:var(--hp-fill); border-radius:12px; overflow:hidden; }
+.menuitem { display:flex; align-items:center; gap:12px; padding:13px 14px; text-align:left; font-weight:500; }
+.menuitem + .menuitem { border-top:1px solid var(--hp-line); }
+.menuitem:active { background:var(--hp-fill); }
+.menuitem > ha-icon:first-child { color:var(--hp-accent); } .menuitem.danger, .menuitem.danger ha-icon { color:var(--hp-bad) !important; }
+.mlabel { flex:1; display:flex; flex-direction:column; }
+.rpebig { width:40px; height:40px; border-radius:10px; display:flex; align-items:center; justify-content:center; font-size:1.2rem; font-weight:700; color:#fff; flex:0 0 auto; }
+.e6 { background:#34c759; } .e7 { background:#a2c037; } .e8 { background:#ffcc00; color:#5a4800; } .e9 { background:#ff9500; } .e10 { background:#ff3b30; }
 @keyframes up { from { transform:translateY(100%); } } @keyframes fade { from { opacity:0; } }
-.toast { position:absolute; left:50%; transform:translateX(-50%); top:calc(66px + env(safe-area-inset-top)); z-index:20; background:#323232; color:#fff; padding:10px 18px; border-radius:22px; font-size:.9rem; box-shadow:0 4px 12px rgba(0,0,0,.25); max-width:90%; text-align:center; animation:fade .2s; }
+@keyframes pop { from { opacity:0; transform:translate(-50%,-48%) scale(.97); } }
+.toast { position:fixed; left:50%; transform:translateX(-50%); top:calc(12px + env(safe-area-inset-top)); z-index:60; background:rgba(30,30,30,.92); color:#fff; padding:10px 18px; border-radius:22px; font-size:.9rem; box-shadow:0 4px 16px rgba(0,0,0,.25); max-width:90%; text-align:center; animation:fade .2s; }
 .wide .toast { top:auto; bottom:24px; } .toast.err { background:var(--hp-bad); }
-@media (max-width: 380px) { .sethead, .setrow { grid-template-columns: 26px minmax(34px,1fr) 56px 42px 42px 34px 20px; gap:4px; } .summary { gap:10px; } .ringwrap { width:110px; height:110px; } }
+@media (max-width: 370px) { .sethead, .setrow { grid-template-columns: 30px minmax(0,1fr) 60px 50px 40px; gap:6px; } .ringwrap { width:104px; height:104px; } }
 `;
 
 customElements.define("health-assistant-panel", HealthAssistantPanel);

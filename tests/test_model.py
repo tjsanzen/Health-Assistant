@@ -17,7 +17,7 @@ PKG_DIR = os.path.join(ROOT, "custom_components", "health_assistant")
 pkg = types.ModuleType("ha_pkg")
 pkg.__path__ = [PKG_DIR]
 sys.modules["ha_pkg"] = pkg
-for mod in ("const", "calculations", "exercises", "model"):
+for mod in ("const", "calculations", "library", "model"):
     spec = importlib.util.spec_from_file_location(f"ha_pkg.{mod}", os.path.join(PKG_DIR, f"{mod}.py"))
     m = importlib.util.module_from_spec(spec)
     sys.modules[f"ha_pkg.{mod}"] = m
@@ -25,6 +25,7 @@ for mod in ("const", "calculations", "exercises", "model"):
 
 calc = sys.modules["ha_pkg.calculations"]
 model_mod = sys.modules["ha_pkg.model"]
+library_mod = sys.modules["ha_pkg.library"]
 
 
 class Clock:
@@ -43,7 +44,11 @@ def make():
         "goal_rate_kg_week": 0.25,
     })
     saves = []
-    m = model_mod.HealthModel(data, lambda: saves.append(1), clock)
+    events = []
+    m = model_mod.HealthModel(data, lambda: saves.append(1), clock,
+                              library=library_mod.ExerciseLibrary().all,
+                              emit=lambda ev, p: events.append(ev))
+    m.events = events
     m.add_vital("weight", {"value": 80})
     return m, clock, saves
 
@@ -133,6 +138,77 @@ def test_validation():
         except model_mod.ValidationError:
             continue
         raise AssertionError("expected ValidationError")
+
+
+def test_library_loads_json_and_demo(tmp_path=None):
+    import json, tempfile
+    d = tempfile.mkdtemp()
+    os.makedirs(os.path.join(d, "demos"))
+    path = os.path.join(d, "exercises.json")
+    with open(path, "w") as fh:
+        json.dump({"lateral_raise_cable": {"name": "Lateral Raise (Cable)", "instructions": "One step"},
+                   "broken": {"muscle": "x"}}, fh)
+    lib = library_mod.ExerciseLibrary(path, os.path.join(d, "demos"), "/static/demos")
+    items = lib.all()
+    assert [e["id"] for e in items] == ["lateral_raise_cable"]
+    assert items[0]["instructions"] == ["One step"] and items[0]["demo_url"] is None
+    open(os.path.join(d, "demos", "lateral_raise_cable.gif"), "wb").close()
+    os.utime(os.path.join(d, "demos"), (1, 2))  # make sure the folder change is noticed
+    assert lib.all()[0]["demo_url"] == "/static/demos/lateral_raise_cable.gif"
+
+
+def test_bundled_library():
+    lib = library_mod.ExerciseLibrary()
+    ids = {e["id"] for e in lib.all()}
+    assert {"bench_press", "lateral_raise", "lateral_raise_cable"} <= ids
+
+
+def test_manual_targets():
+    m, _, _ = make()
+    auto = m.energy()["target"]
+    m.update_profile({"calorie_target_override": 2000})
+    e = m.energy()
+    assert e["target"] == 2000 and e["target_manual"] and e["target_auto"] == auto
+    assert abs(e["protein_g"] * 4 + e["fat_g"] * 9 + e["carbs_g"] * 4 - 2000) < 5
+    m.update_profile({"protein_override_g": 180})
+    e = m.energy()
+    assert e["protein_g"] == 180 and abs(e["protein_g"] * 4 + e["fat_g"] * 9 + e["carbs_g"] * 4 - 2000) < 5
+    m.update_profile({"calorie_target_override": None, "protein_override_g": ""})
+    assert not m.energy()["target_manual"] and m.energy()["target"] == auto
+
+
+def test_food_stats():
+    m, clock, _ = make()
+    for back, kcal in ((1, 2000), (2, 2200), (3, 1800), (20, 3000)):
+        clock.t = datetime(2026, 11, 9, 12) - timedelta(days=back)
+        m.add_food({"name": "x", "kcal": kcal, "protein": 100})
+    clock.t = datetime(2026, 11, 9, 12)
+    m.add_food({"name": "today", "kcal": 500})
+    st = m.food_stats()
+    assert st["d7"]["days_logged"] == 3 and st["d7"]["avg"]["kcal"] == 2000
+    assert st["d30"]["days_logged"] == 4 and st["all"]["avg"]["kcal"] == 2250
+    assert st["streak"] == 4  # today + 3 days back
+    assert len(st["series"]) == 14 and st["series"][-1]["kcal"] == 500
+
+
+def test_rest_timer_and_events():
+    m, clock, _ = make()
+    m.update_profile({"rest_default_s": 90})
+    w = m.start_workout()
+    assert m.rest_for("squat") == 90
+    w["exercises"].append({"id": "a", "exercise_id": "squat", "rest_s": 150, "superset": None, "sets": [
+        {"id": "1", "type": "working", "weight": 100, "reps": 5, "completed": True}]})
+    m.update_active_workout(w)
+    m.set_rest(1000.0, 150, "squat")
+    import copy
+    w2 = copy.deepcopy(m.data["active_workout"])
+    w2["rest"] = None  # the client can't clear rest through a workout update
+    m.update_active_workout(w2)
+    assert m.data["active_workout"]["rest"]["total"] == 150
+    m.finish_workout()
+    assert "rest" not in m.data["workouts"][-1]
+    assert m.rest_for("squat") == 150 and m.last_info("squat")["rest_s"] == 150
+    assert m.events == ["workout_started", "rest", "workout_ended"]
 
 
 if __name__ == "__main__":

@@ -22,6 +22,8 @@ from .const import (
     STATIC_URL, STORAGE_KEY, STORAGE_VERSION,
 )
 from .food_db import FoodDatabase
+from .library import DEMOS_DIR, ExerciseLibrary
+from .live_activity import LiveActivity
 from .model import HealthModel, empty_data
 from .websocket_api import async_register_websocket_commands
 
@@ -34,6 +36,7 @@ FRONTEND_DIR = os.path.join(os.path.dirname(__file__), "frontend")
 class HealthRuntime:
     model: HealthModel
     store: Store
+    live: LiveActivity
 
 
 type HealthConfigEntry = ConfigEntry[HealthRuntime]
@@ -46,6 +49,9 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
         os.path.join(os.path.dirname(__file__), "data", "foods.db"),
     ])
     domain["food_db"] = db
+    domain["library"] = ExerciseLibrary(demo_url=f"{STATIC_URL}/demos")
+    count = len(await hass.async_add_executor_job(domain["library"].all))
+    _LOGGER.info("Health Assistant exercise library: %s exercises", count)
     if db.available:
         count = await hass.async_add_executor_job(db.count)
         _LOGGER.info("Health Assistant food database loaded: %s foods (%s)", count, db.path)
@@ -62,7 +68,10 @@ async def _async_register_panel(hass: HomeAssistant) -> None:
     domain = hass.data[DOMAIN]
     if not domain.get("static_registered"):
         await hass.http.async_register_static_paths(
-            [StaticPathConfig(STATIC_URL, FRONTEND_DIR, cache_headers=False)]
+            [
+                StaticPathConfig(f"{STATIC_URL}/demos", DEMOS_DIR, cache_headers=True),
+                StaticPathConfig(STATIC_URL, FRONTEND_DIR, cache_headers=False),
+            ]
         )
         domain["static_registered"] = True
     if domain.get("panel_registered"):
@@ -126,8 +135,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: HealthConfigEntry) -> bo
         store.async_delay_save(lambda: model.data, 2)
         async_dispatcher_send(hass, signal)
 
-    model = HealthModel(data, _save, dt_util.now)
-    entry.runtime_data = HealthRuntime(model=model, store=store)
+    library: ExerciseLibrary = hass.data[DOMAIN]["library"]
+
+    def _exercise_name(ex_id: str) -> str:
+        ex = model.exercise(ex_id)
+        return ex["name"] if ex else ex_id
+
+    live = LiveActivity(hass, lambda: model.profile, _exercise_name)
+    model = HealthModel(data, _save, dt_util.now, library=library.all, emit=live.handle)
+    entry.runtime_data = HealthRuntime(model=model, store=store, live=live)
 
     # Day rollover: refresh "today" sensors just after midnight
     @callback

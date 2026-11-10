@@ -1,0 +1,390 @@
+{
+  "bench_press": {
+    "name": "Bench Press",
+    "muscle": "Chest",
+    "equipment": "Barbell",
+    "kind": "weight_reps",
+    "instructions": [],
+    "demo": "bench_press.gif"
+  },
+  "incline_bench_press": {
+    "name": "Incline Bench Press",
+    "muscle": "Chest",
+    "equipment": "Barbell",
+    "kind": "weight_reps",
+    "instructions": [],
+    "demo": "incline_bench_press.gif"
+  },
+  "db_bench_press": {
+    "name": "Dumbbell Bench Press",
+    "muscle": "Chest",
+    "equipment": "Dumbbell",
+    "kind": "weight_reps",
+    "instructions": [],
+    "demo": "db_bench_press.gif"
+  },
+  "incline_db_press": {
+    "name": "Incline Dumbbell Press",
+    "muscle": "Chest",
+    "equipment": "Dumbbell",
+    "kind": "weight_reps",
+    "instructions": [],
+    "demo": "incline_db_press.gif"
+  },
+  "chest_fly_machine": {
+    "name": "Chest Fly (Machine)",
+    "muscle": "Chest",
+    "equipment": "Machine",
+    "kind": "weight_reps",
+    "instructions": [],
+    "demo": "chest_fly_machine.gif"
+  },
+  "cable_crossover": {
+    "name": "Cable Crossover",
+    "muscle": "Chest",
+    "equipment": "Cable",
+    "kind": "weight_reps",
+    "instructions": [],
+    "demo": "cable_crossover.gif"
+  },
+  "push_up": {
+    "name": "Push-up",
+    "muscle": "Chest",
+    "equipment": "Bodyweight",
+    "kind": "bodyweight_reps",
+    "instructions": [],
+    "demo": "push_up.gif"
+  },
+  "dip": {
+    "name": "Dip",
+    "muscle": "Chest",
+    "equipment": "Bodyweight",
+    "kind": "bodyweight_reps",
+    "instructions": [],
+    "demo": "dip.gif"
+  },
+  "deadlift": {
+    "name": "Deadlift",
+    "muscle": "Back",
+    "equipment": "Barbell",
+    "kind": "weight_reps",
+    "instructions": [],
+    "demo": "deadlift.gif"
+  },
+  "barbell_row": {
+    "name": "Barbell Row",
+    "muscle": "Back",
+    "equipment": "Barbell",
+    "kind": "weight_reps",
+    "instructions": [],
+    "demo": "barbell_row.gif"
+  },
+  "db_row": {
+    "name": "Dumbbell Row",
+    "muscle": "Back",
+    "equipment": "Dumbbell",
+    "kind": "weight_reps",
+    "instructions": [],
+    "demo": "db_row.gif"
+  },
+  "lat_pulldown": {
+    "name": "Lat Pulldown",
+    "muscle": "Back",
+    "equipment": "Cable",
+    "kind": "weight_reps",
+    "instructions": [],
+    "demo": "lat_pulldown.gif"
+  },
+  "seated_cable_row": {
+    "name": "Seated Cable Row",
+    "muscle": "Back",
+    "equipment": "Cable",
+    "kind": "weight_reps",
+    "instructions": [],
+    "demo": "seated_cable_row.gif"
+  },
+  "pull_up": {
+    "name": "Pull-up",
+    "muscle": "Back",
+    "equipment": "Bodyweight",
+    "kind": "bodyweight_reps",
+    "instructions": [],
+    "demo": "pull_up.gif"
+  },
+  "chin_up": {
+    "name": "Chin-up",
+    "muscle": "Back",
+    "equipment": "Bodyweight",
+    "kind": "bodyweight_reps",
+    "instructions": [],
+    "demo": "chin_up.gif"
+  },
+  "t_bar_row": {
+    "name": "T-Bar Row",
+    "muscle": "Back",
+    "equipment": "Machine",
+    "kind": "weight_reps",
+    "instructions": [],
+    "demo": "t_bar_row.gif"
+  },
+  "squat": {
+    "name": "Squat",
+    "muscle": "Legs",
+    "equipment": "Barbell",
+    "kind": "weight_reps",
+    "instructions": [],
+    "demo": "squat.gif"
+  },
+  "front_squat": {
+    "name": "Front Squat",
+    "muscle": "Legs",
+    "equipment": "Barbell",
+    "kind": "weight_reps",
+    "instructions": [],
+    "demo": "front_squat.gif"
+  },
+  "romanian_deadlift": {
+    "name": "Romanian Deadlift",
+    "muscle": "Legs",
+    "equipment": "Barbell",
+    "kind": "weight_reps",
+    "instructions": [],
+    "demo": "romanian_deadlift.gif"
+  },
+  "leg_press": {
+    "name": "Leg Press",
+    "muscle": "Legs",
+    "equipment": "Machine",
+    "kind": "weight_reps",
+    "instructions": [],
+    "demo": "leg_press.gif"
+  },
+  "leg_extension": {
+    "name": "Leg Extension",
+    "muscle": "Legs",
+    "equipment": "Machine",
+    "kind": "weight_reps",
+    "instructions": [],
+    "demo": "leg_extension.gif"
+  },
+  "leg_curl": {
+    "name": "Leg Curl",
+    "muscle": "Legs",
+    "equipment": "Machine",
+    "kind": "weight_reps",
+    "instructions": [],
+    "demo": "leg_curl.gif"
+  },
+  "bulgarian_split_squat": {
+    "name": "Bulgarian Split Squat",
+    "muscle": "Legs",
+    "equipment": "Dumbbell",
+    "kind": "weight_reps",
+    "instructions": [],
+    "demo": "bulgarian_split_squat.gif"
+  },
+  "walking_lunge": {
+    "name": "Walking Lunge",
+    "muscle": "Legs",
+    "equipment": "Dumbbell",
+    "kind": "weight_reps",
+    "instructions": [],
+    "demo": "walking_lunge.gif"
+  },
+  "hip_thrust": {
+    "name": "Hip Thrust",
+    "muscle": "Legs",
+    "equipment": "Barbell",
+    "kind": "weight_reps",
+    "instructions": [],
+    "demo": "hip_thrust.gif"
+  },
+  "calf_raise": {
+    "name": "Calf Raise",
+    "muscle": "Legs",
+    "equipment": "Machine",
+    "kind": "weight_reps",
+    "instructions": [],
+    "demo": "calf_raise.gif"
+  },
+  "goblet_squat": {
+    "name": "Goblet Squat",
+    "muscle": "Legs",
+    "equipment": "Dumbbell",
+    "kind": "weight_reps",
+    "instructions": [],
+    "demo": "goblet_squat.gif"
+  },
+  "overhead_press": {
+    "name": "Overhead Press",
+    "muscle": "Shoulders",
+    "equipment": "Barbell",
+    "kind": "weight_reps",
+    "instructions": [],
+    "demo": "overhead_press.gif"
+  },
+  "db_shoulder_press": {
+    "name": "Dumbbell Shoulder Press",
+    "muscle": "Shoulders",
+    "equipment": "Dumbbell",
+    "kind": "weight_reps",
+    "instructions": [],
+    "demo": "db_shoulder_press.gif"
+  },
+  "lateral_raise": {
+    "name": "Lateral Raise",
+    "muscle": "Shoulders",
+    "equipment": "Dumbbell",
+    "kind": "weight_reps",
+    "instructions": [],
+    "demo": "lateral_raise.gif"
+  },
+  "lateral_raise_cable": {
+    "name": "Lateral Raise (Cable)",
+    "muscle": "Shoulders",
+    "secondary": [
+      "Traps"
+    ],
+    "equipment": "Cable",
+    "kind": "weight_reps",
+    "instructions": [
+      "Set a single cable pulley to its lowest position and attach a D-handle.",
+      "Stand side-on to the machine and grab the handle with your far hand, cable running across the front of your body.",
+      "With a slight bend in the elbow, raise your arm out to the side until it is level with your shoulder.",
+      "Pause briefly at the top, then lower slowly under control. Finish all reps, then switch sides."
+    ],
+    "tips": [
+      "Lead with the elbow, not the hand.",
+      "Keep your torso still \u2014 no swinging."
+    ],
+    "demo": "lateral_raise_cable.gif"
+  },
+  "rear_delt_fly": {
+    "name": "Rear Delt Fly",
+    "muscle": "Shoulders",
+    "equipment": "Dumbbell",
+    "kind": "weight_reps",
+    "instructions": [],
+    "demo": "rear_delt_fly.gif"
+  },
+  "face_pull": {
+    "name": "Face Pull",
+    "muscle": "Shoulders",
+    "equipment": "Cable",
+    "kind": "weight_reps",
+    "instructions": [],
+    "demo": "face_pull.gif"
+  },
+  "barbell_curl": {
+    "name": "Barbell Curl",
+    "muscle": "Arms",
+    "equipment": "Barbell",
+    "kind": "weight_reps",
+    "instructions": [],
+    "demo": "barbell_curl.gif"
+  },
+  "db_curl": {
+    "name": "Dumbbell Curl",
+    "muscle": "Arms",
+    "equipment": "Dumbbell",
+    "kind": "weight_reps",
+    "instructions": [],
+    "demo": "db_curl.gif"
+  },
+  "hammer_curl": {
+    "name": "Hammer Curl",
+    "muscle": "Arms",
+    "equipment": "Dumbbell",
+    "kind": "weight_reps",
+    "instructions": [],
+    "demo": "hammer_curl.gif"
+  },
+  "tricep_pushdown": {
+    "name": "Tricep Pushdown",
+    "muscle": "Arms",
+    "equipment": "Cable",
+    "kind": "weight_reps",
+    "instructions": [],
+    "demo": "tricep_pushdown.gif"
+  },
+  "skull_crusher": {
+    "name": "Skull Crusher",
+    "muscle": "Arms",
+    "equipment": "Barbell",
+    "kind": "weight_reps",
+    "instructions": [],
+    "demo": "skull_crusher.gif"
+  },
+  "overhead_tricep_ext": {
+    "name": "Overhead Tricep Extension",
+    "muscle": "Arms",
+    "equipment": "Dumbbell",
+    "kind": "weight_reps",
+    "instructions": [],
+    "demo": "overhead_tricep_ext.gif"
+  },
+  "plank": {
+    "name": "Plank",
+    "muscle": "Core",
+    "equipment": "Bodyweight",
+    "kind": "duration",
+    "instructions": [],
+    "demo": "plank.gif"
+  },
+  "hanging_leg_raise": {
+    "name": "Hanging Leg Raise",
+    "muscle": "Core",
+    "equipment": "Bodyweight",
+    "kind": "bodyweight_reps",
+    "instructions": [],
+    "demo": "hanging_leg_raise.gif"
+  },
+  "cable_crunch": {
+    "name": "Cable Crunch",
+    "muscle": "Core",
+    "equipment": "Cable",
+    "kind": "weight_reps",
+    "instructions": [],
+    "demo": "cable_crunch.gif"
+  },
+  "ab_wheel": {
+    "name": "Ab Wheel Rollout",
+    "muscle": "Core",
+    "equipment": "Bodyweight",
+    "kind": "bodyweight_reps",
+    "instructions": [],
+    "demo": "ab_wheel.gif"
+  },
+  "treadmill": {
+    "name": "Treadmill",
+    "muscle": "Cardio",
+    "equipment": "Machine",
+    "kind": "distance",
+    "instructions": [],
+    "demo": "treadmill.gif"
+  },
+  "rowing_machine": {
+    "name": "Rowing Machine",
+    "muscle": "Cardio",
+    "equipment": "Machine",
+    "kind": "distance",
+    "instructions": [],
+    "demo": "rowing_machine.gif"
+  },
+  "stationary_bike": {
+    "name": "Stationary Bike",
+    "muscle": "Cardio",
+    "equipment": "Machine",
+    "kind": "duration",
+    "instructions": [],
+    "demo": "stationary_bike.gif"
+  },
+  "stair_climber": {
+    "name": "Stair Climber",
+    "muscle": "Cardio",
+    "equipment": "Machine",
+    "kind": "duration",
+    "instructions": [],
+    "demo": "stair_climber.gif"
+  }
+}
