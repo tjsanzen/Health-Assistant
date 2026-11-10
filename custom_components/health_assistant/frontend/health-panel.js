@@ -260,9 +260,9 @@ class HealthAssistantPanel extends HTMLElement {
       <div class="app ${this._narrow ? "narrow" : "wide"}">
         <header class="top">
           <div class="title">${icon("mdi:food-apple", "brand")}<span>Health</span></div>
-          <nav class="topnav" id="topnav"></nav>
           <div class="spacer"></div>
           <div id="profilepick"></div>
+          <nav class="topnav" id="topnav"></nav>
         </header>
         <main id="content"></main>
         <div id="rest"></div>
@@ -308,7 +308,8 @@ class HealthAssistantPanel extends HTMLElement {
     root.getElementById("bottomnav").innerHTML =
       `<button class="navbtn" data-action="menu" aria-label="Home Assistant menu"><span class="navicon">${icon("mdi:menu")}</span><span class="navlabel">Menu</span></button>` +
       btn(hist) + btn(work) + btn(nut) + btn(prof);
-    root.getElementById("topnav").innerHTML = TABS.map((t) => btn(t)).join("");
+    // Desktop header: right-aligned, with Start Workout furthest right.
+    root.getElementById("topnav").innerHTML = btn(hist) + btn(nut) + btn(prof) + btn(work);
     root.getElementById("profilepick").innerHTML = this._profileSelect();
   }
 
@@ -1543,7 +1544,7 @@ main { flex:1 1 auto; min-height:0; overflow-y:auto; -webkit-overflow-scrolling:
 .spacer { flex:1; }
 .profilesel { width:auto; padding:6px 28px 6px 10px; font-size:14px; }
 .top .profilesel { background:transparent; color:inherit; border:1px solid color-mix(in srgb, currentColor 30%, transparent); }
-.topnav { display:flex; gap:4px; margin-left:24px; }
+.topnav { display:flex; gap:4px; margin-left:12px; }
 .topnav .navbtn { display:flex; align-items:center; gap:6px; padding:7px 14px; border-radius:18px; opacity:.75; }
 .topnav .navbtn:hover { opacity:1; background:color-mix(in srgb, currentColor 10%, transparent); }
 .topnav .navbtn.on { opacity:1; background:color-mix(in srgb, currentColor 16%, transparent); font-weight:600; }
