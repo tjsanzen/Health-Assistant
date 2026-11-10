@@ -1,6 +1,20 @@
-# Health Assistant
+# <img src="custom_components/brand/icon.png" alt="Logo" height="64" style="vertical-align: middle;"> Health Assistant
 
-Calorie tracking, workout logging and health stats for Home Assistant, in an app-style **Health** sidebar panel that works on desktop and on the iOS companion app.
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Home Assistant](https://img.shields.io/badge/Home%20Assistant-2025.2+-41BDF5.svg)](https://www.home-assistant.io/)
+[![English](https://img.shields.io/badge/lang-English-blue.svg)](#localization)
+
+Workout, Nutrition, and Health Datapoint logging inside of Home Assistant. Track workouts, personal records, count calories, and meet your goals without compromising your data. 
+
+> **IMPORTANT NOTICE**
+> 
+> ⚠️ **This integration is _<ins>NOT</ins>_ able to run offline.**
+> Health Assistant requires a connection to your Home Assistant server to run. While most gyms have free wifi for members, please keep this > in mind when using. This integration has been developed for web and the iOS companion app.
+
+## Installation
+
+<a href="https://my.home-assistant.io/redirect/hacs_repository/?owner=smkrv&repository=ha-metar-weather&category=Integration"><img src="https://my.home-assistant.io/badges/hacs_repository.svg" width="210" height="auto"></a>
+
 
 ## What's in v0.1
 
