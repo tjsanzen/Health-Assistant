@@ -80,6 +80,7 @@ def calculate_energy(
     daily_steps: int,
     lifting_days: float,
     lifting_hours_per_week: float | None = None,
+    lifting_kcal_per_day: float | None = None,
     target_weight_kg: float | None,
     goal_rate_kg_week: float,
 ) -> EnergyResult:
@@ -98,6 +99,8 @@ def calculate_energy(
     # Logged training time wins over the "days per week × 1 hour" setup answer.
     hours = lifting_hours_per_week if lifting_hours_per_week is not None else lifting_days * 1.0
     lifting_kcal = hours * LIFT_NET_MET * weight_kg / 7
+    if lifting_kcal_per_day is not None:  # per-set estimate from logged workouts wins
+        lifting_kcal = lifting_kcal_per_day
     maintenance = base + step_kcal + lifting_kcal
     multiplier = maintenance / bmr
 
@@ -161,3 +164,184 @@ def estimated_1rm(weight: float, reps: int) -> float:
 def scale_nutrients(per_100g: dict, grams: float) -> dict:
     f = grams / 100
     return {k: round((per_100g.get(k) or 0) * f, 1) for k in per_100g}
+
+
+# ---- Workout calorie engine -------------------------------------------------
+#
+# Calories = Σ over time segments of  MET × body weight (kg) × minutes / 60.
+# Segments: each set's working time (exercise MET × effort multiplier), the rest
+# that follows it, transitions between exercises, and idle time. Based on the
+# "dynamic set-by-set" model, adapted to what Health Assistant records:
+#   * set tick times (completed_at) give real rest lengths; older workouts without
+#     them fall back to the planned rest timer;
+#   * "active" calories (above the 1 MET you'd burn sitting still) are reported
+#     alongside the total — maintenance calories and Apple Health use active.
+
+# MET while the set is being performed. One step above the textbook tiers (7/5/4/3) so whole
+# sessions, rest included, line up with measured values (see REST_FRACTION).
+TIER_MET = {1: 8.0, 2: 6.0, 3: 5.0, 4: 4.0}
+DEFAULT_BASE_MET = 5.0
+MET_CAP = 12.0
+SECONDS_PER_REP = 4
+SET_SETUP_S = 10                  # unrack, brace, re-rack
+MIN_SET_SECONDS = 10
+DEFAULT_SET_SECONDS = 30          # a set with no reps or time logged
+DEFAULT_REST_S = 120
+REST_MET = 1.5                    # floor for recovering between sets, within the rest window
+# Breathing and heart rate stay up after a hard set (oxygen debt), so rest burns a share of
+# the set's intensity rather than a flat 1.5 METs. Calibrated so whole sessions land on the
+# Compendium of Physical Activities: ~3.5 METs for moderate multi-exercise training,
+# ~5 for squat/deadlift-heavy work, ~6 for vigorous lifting.
+REST_FRACTION = 0.75
+REST_GRACE_S = 60                 # minor overrun still counts as rest
+TRANSITION_MET = 2.0              # walking to the next station, re-racking
+TRANSITION_S = 120
+SUPERSET_SWITCH_S = 60            # moving between superset partners
+IDLE_MET = 1.2                    # long gaps: back to (nearly) resting
+MAX_IDLE_PER_GAP_S = 20 * 60      # phone calls etc. don't count forever
+SETUP_S = 5 * 60                  # before the first set: setup / warm-up walk-around
+TAIL_IDLE_CAP_S = 10 * 60         # after the last set, if Finish was pressed late
+
+
+def rpe_multiplier(rpe: float | None, set_type: str = "working") -> float:
+    """Effort scaling. Without an RPE, the set type stands in."""
+    if rpe in (None, ""):
+        return {"warmup": 0.85, "failure": 1.20, "drop": 1.10}.get(set_type, 1.0)
+    rpe = float(rpe)
+    if rpe < 6:
+        return 0.85
+    if rpe < 8:
+        return 1.0
+    if rpe < 9.5:
+        return 1.10
+    return 1.20
+
+
+def exercise_base_met(ex: dict | None) -> float:
+    if not ex:
+        return DEFAULT_BASE_MET
+    if ex.get("base_met"):
+        return float(ex["base_met"])
+    if ex.get("tier") in TIER_MET:
+        return TIER_MET[ex["tier"]]
+    return DEFAULT_BASE_MET
+
+
+def set_active_seconds(s: dict, kind: str) -> float:
+    if kind in ("duration", "distance") and s.get("duration_s"):
+        return float(s["duration_s"])
+    reps = s.get("reps")
+    if reps:
+        return max(MIN_SET_SECONDS, float(reps) * SECONDS_PER_REP + SET_SETUP_S)
+    return DEFAULT_SET_SECONDS
+
+
+def _ts(iso: str | None):
+    from datetime import datetime
+    if not iso:
+        return None
+    try:
+        return datetime.fromisoformat(iso)
+    except ValueError:
+        return None
+
+
+def _secs(a, b) -> float:
+    """b - a in seconds. If only one has a timezone, the other is taken as local time."""
+    if (a.tzinfo is None) != (b.tzinfo is None):
+        a = a.astimezone().replace(tzinfo=None) if a.tzinfo else a
+        b = b.astimezone().replace(tzinfo=None) if b.tzinfo else b
+    return (b - a).total_seconds()
+
+
+def workout_calories(workout: dict, exercises: dict[str, dict], weight_kg: float | None) -> dict:
+    """Estimate energy for a finished workout. `exercises` maps id -> library entry."""
+    kg = weight_kg or 75.0
+    segs: list[tuple[float, float, str, str]] = []  # (seconds, met, phase, exercise_id)
+
+    seq = []
+    for pos, ex in enumerate(workout.get("exercises", [])):
+        for si, s in enumerate(ex.get("sets", [])):
+            if s.get("completed", True):
+                seq.append({"ex": ex, "set": s, "pos": pos, "si": si, "t": _ts(s.get("completed_at"))})
+    if not seq:
+        return {"kcal_total": 0, "kcal_active": 0, "active_min": 0, "rest_min": 0, "idle_min": 0,
+                "avg_met": 0, "timed": False, "by_exercise": {}}
+
+    timed = all(x["t"] for x in seq)
+    if timed:
+        seq.sort(key=lambda x: x["t"])
+
+    def info(x):
+        lib = exercises.get(x["ex"]["exercise_id"])
+        kind = (lib or {}).get("kind", "weight_reps")
+        return lib, kind, set_active_seconds(x["set"], kind)
+
+    for i, x in enumerate(seq):
+        lib, kind, active = info(x)
+        met = min(MET_CAP, exercise_base_met(lib) * rpe_multiplier(x["set"].get("rpe"), x["set"].get("type", "working")))
+        segs.append((active, met, "set", x["ex"]["exercise_id"]))
+        if i == len(seq) - 1:
+            break
+        nxt = seq[i + 1]
+        _, _, next_active = info(nxt)
+        same_ex = nxt["pos"] == x["pos"]
+        same_ss = bool(x["ex"].get("superset")) and nxt["ex"].get("superset") == x["ex"].get("superset")
+        rest_s = x["ex"].get("rest_s")
+        rest_s = DEFAULT_REST_S if rest_s is None else float(rest_s)
+        if timed:
+            gap = max(0.0, _secs(x["t"], nxt["t"]) - next_active)
+        else:  # no tick times: assume the plan was followed
+            gap = rest_s if same_ex else SUPERSET_SWITCH_S if same_ss else TRANSITION_S + rest_s
+        ex_id = x["ex"]["exercise_id"]
+        recovery = max(REST_MET, met * REST_FRACTION)
+        if same_ex:
+            phases = [(rest_s + REST_GRACE_S, recovery, "rest")]
+        elif same_ss:
+            phases = [(SUPERSET_SWITCH_S, max(TRANSITION_MET, recovery), "transition")]
+        else:  # finished an exercise: rest, then a 2-minute transition buffer
+            phases = [(rest_s, recovery, "rest"), (TRANSITION_S, TRANSITION_MET, "transition")]
+        for length, met, phase in phases:
+            take = min(gap, length)
+            if take > 0:
+                segs.append((take, met, phase, ex_id))
+            gap -= take
+        if gap > 0:
+            segs.append((min(gap, MAX_IDLE_PER_GAP_S), IDLE_MET, "idle", ex_id))
+
+    # Before the first set and after the last one (only knowable with tick times).
+    start, end = _ts(workout.get("started_at")), _ts(workout.get("ended_at"))
+    if timed and start:
+        _, _, first_active = info(seq[0])
+        lead = max(0.0, _secs(start, seq[0]["t"]) - first_active)
+        segs.append((min(lead, SETUP_S), TRANSITION_MET, "transition", ""))
+        if lead > SETUP_S:
+            segs.append((min(lead - SETUP_S, MAX_IDLE_PER_GAP_S), IDLE_MET, "idle", ""))
+    if timed and end:
+        tail = max(0.0, _secs(seq[-1]["t"], end))
+        segs.append((min(tail, TRANSITION_S), TRANSITION_MET, "transition", ""))
+        if tail > TRANSITION_S:
+            segs.append((min(tail - TRANSITION_S, TAIL_IDLE_CAP_S), IDLE_MET, "idle", ""))
+
+    total = active = 0.0
+    mins = {"set": 0.0, "rest": 0.0, "transition": 0.0, "idle": 0.0}
+    by_ex: dict[str, float] = {}
+    for secs, met, phase, ex_id in segs:
+        m = secs / 60
+        kcal = met * kg * m / 60
+        total += kcal
+        active += max(0.0, met - 1.0) * kg * m / 60
+        mins[phase] += m
+        if ex_id:
+            by_ex[ex_id] = by_ex.get(ex_id, 0.0) + kcal
+    all_min = sum(mins.values())
+    return {
+        "kcal_total": round(total),
+        "kcal_active": round(active),
+        "active_min": round(mins["set"], 1),
+        "rest_min": round(mins["rest"] + mins["transition"], 1),
+        "idle_min": round(mins["idle"], 1),
+        "avg_met": round(total / (kg * all_min / 60), 2) if all_min else 0,
+        "timed": timed,
+        "by_exercise": {k: round(v) for k, v in by_ex.items()},
+    }

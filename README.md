@@ -84,7 +84,7 @@ The sensor counts steps your iPhone detects, not your Apple Watch. If it's missi
   
   The implied activity multiplier and label (Sedentary → Extremely active) are shown in the panel.
 - **Target**: maintenance ± (goal pace × 7,700 kcal/kg ÷ 7). The direction comes from target vs current weight; within 0.5 kg counts as maintain. The target never drops below 1,500 kcal (male) or 1,200 kcal (female).
-- **Lifting**: until you've been logging workouts for 2 weeks, lifting calories come from the "days per week" setup answer, at 1 hour each. After that, they come from your actual logged training time: the last 4 weeks of workout durations, with each session capped at 3 hours in case you forget to press Finish. The setup answer is then locked, and the Profile shows your hours per week.
+- **Lifting**: until you've been logging workouts for 2 weeks, lifting calories come from the "days per week" setup answer, at 1 hour each. After that, they're the active calories of your logged workouts (see below), averaged over the last 4 weeks. The setup answer is then locked, and the Profile shows your lifting kcal/day.
 - **Protein**: 0.6 g per lb of body weight, or 0.9 g/lb if your latest body fat is under 15%. Fat is 25% of calories and carbs are the rest.
 - **Deficit warning**: if a target works out to more than 600 kcal/day below maintenance, Health Assistant shows a warning you can override. This applies in setup, under Daily targets and under Body & goal.
 - **Manual targets** (Profile → Daily targets → Edit) replace any of these. With only calories set, protein stays calculated, fat is 25% and carbs fill the rest; with fixed protein/fat, carbs fill whatever calories are left.
@@ -92,6 +92,33 @@ The sensor counts steps your iPhone detects, not your Apple Watch. If it's missi
 - Current weight, body fat and height always come from your **latest logged health stat**, so the targets update as you log.
 - Records ignore warm-up sets. Estimated 1RM uses Epley: `w × (1 + reps/30)`.
 
+
+### Workout calories
+
+Every finished workout gets a set-by-set estimate instead of "time × one MET value":
+
+```
+calories = Σ  MET × body weight (kg) × minutes / 60      over every set, rest and transition
+```
+
+- **Each set** is reps × 4 s plus 10 s to unrack and brace (or the logged time for timed and cardio exercises), at the exercise's MET × an effort multiplier.
+- **Exercise MET**, from `tier` in `exercises.json`:
+
+  | Tier | Type | Examples | MET during the set |
+  | --- | --- | --- | --- |
+  | 1 | Heavy full-body | squat, deadlift, RDL | 8.0 |
+  | 2 | Compound | bench, overhead press, rows, pull-ups | 6.0 |
+  | 3 | Machine or supported compound | leg press, lunges, cable row | 5.0 |
+  | 4 | Isolation | curls, raises, extensions | 4.0 |
+
+  Cardio and core entries set an exact `base_met` instead. Custom exercises ask for a type when you create them.
+- **Effort**: RPE 6–7.5 ×1.0, 8–9 ×1.1, 9.5–10 ×1.2, under 6 ×0.85. A set without an RPE uses its type: warm-up ×0.85, drop ×1.1, failure ×1.2.
+- **Rest** between sets of the same exercise burns 75% of the set's intensity (minimum 1.5 METs), because breathing and heart rate stay up after a hard set. That applies for your rest timer plus 60 seconds. Anything longer counts as idle at 1.2 METs, capped at 20 minutes per gap.
+- **Moving to the next exercise**: the rest, then a 2-minute transition at 2.0 METs. Switching between superset partners gets 1 minute at 2.0.
+- **Before the first set** up to 5 minutes counts at 2.0 METs. **After the last set** 2 minutes counts at 2.0, and anything beyond is idle, capped at 10 minutes in case Finish was pressed late.
+- **Timing**: ticking a set records its time, so real rest lengths are used. Workouts logged before this update assume you rested exactly as planned.
+- **Results**: workouts show **active** calories (above resting, like Apple Watch's Active Energy) and **total** calories. Maintenance calories and Apple Health use active, so nothing is counted twice.
+- **Calibration**: the published MET tiers (7/5/4/3) with rest at a flat 1.5 METs gave whole-session averages around 2 METs. Measured values are higher. The 2024 Compendium of Physical Activities lists ~3.5 METs for moderate multi-exercise training, 5.0 for squats and deadlifts, and 6.0 for vigorous lifting. With the tiers above and rest at 75%, a typical 55-minute session at 80 kg comes out at about 3.9 METs for a moderate push day (~210 active kcal), 4.7 for a hard leg day (~280) and 3.0 for arms (~150). No single segment exceeds 12 METs.
 
 ### Data model
 

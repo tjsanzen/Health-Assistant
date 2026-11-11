@@ -11,6 +11,9 @@ exercises.json format — one entry per exercise, keyed by id:
       "secondary": ["Traps"],              # optional
       "equipment": "Cable",
       "kind": "weight_reps",               # weight_reps | bodyweight_reps | duration | distance
+      "tier": 4,                           # calorie tier: 1 heavy multi-joint (7 MET) · 2 compound (5)
+                                           #   · 3 machine/supported compound (4) · 4 isolation (3)
+      "base_met": 3.0,                     # optional: exact MET instead of the tier (e.g. cardio)
       "instructions": ["Step 1", "Step 2"],# list of steps, or one string
       "tips": ["..."],                     # optional
       "demo": "lateral_raise_cable.gif"    # file in data/demos/ (defaults to <id>.gif)
@@ -97,6 +100,8 @@ class ExerciseLibrary:
                 "secondary": e.get("secondary") or [],
                 "equipment": e.get("equipment") or "Other",
                 "kind": kind if kind in KINDS else "weight_reps",
+                "tier": e.get("tier"),
+                "base_met": e.get("base_met"),
                 "instructions": instructions,
                 "tips": e.get("tips") or [],
                 "demo_url": f"{self.demo_url}/{demo}" if demo in demos else None,

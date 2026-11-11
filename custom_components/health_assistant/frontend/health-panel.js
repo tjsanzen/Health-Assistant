@@ -382,6 +382,7 @@ class HealthAssistantPanel extends HTMLElement {
           <span>${icon("mdi:timer-outline")} ${fmtDur(sm.duration_s)}</span>
           <span>${icon("mdi:weight")} ${r0(this._units.wOut(sm.volume_kg, 0))} ${this._units.w}</span>
           <span>${icon("mdi:format-list-numbered")} ${sm.sets} sets</span>
+          ${sm.kcal_active != null ? `<span>${icon("mdi:fire")} ${r0(sm.kcal_active)} kcal</span>` : ""}
         </div>${lines}${more}</button>`;
     }).join("");
     const loadMore = s.workouts.length < s.workoutsTotal ? `<button class="btn ghost full" data-action="moreWorkouts">Load more</button>` : "";
@@ -438,6 +439,11 @@ class HealthAssistantPanel extends HTMLElement {
     return `<h2>${esc(w.name)}</h2>
       <div class="muted">${fmtDate(w.started_at, { weekday: "long", month: "long", day: "numeric", year: "numeric" })} · ${fmtTime(w.started_at)}</div>
       <div class="stats big"><span>${icon("mdi:timer-outline")} ${fmtDur(sm.duration_s)}</span><span>${icon("mdi:weight")} ${r0(u.wOut(sm.volume_kg, 0))} ${u.w}</span><span>${icon("mdi:format-list-numbered")} ${sm.sets} sets</span></div>
+      ${sm.kcal_active != null ? `<div class="kcalbox">
+        <div><div class="big">${r0(sm.kcal_active)}</div><div class="muted xsmall">active kcal</div></div>
+        <div><div class="big">${r0(sm.kcal_total)}</div><div class="muted xsmall">total kcal</div></div>
+        <div class="muted xsmall kcalsplit">${r0(sm.active_min)} min lifting · ${r0(sm.rest_min)} min rest & moving${sm.idle_min >= 1 ? ` · ${r0(sm.idle_min)} min idle` : ""}${sm.timed === false ? "<br>Estimated from your planned rest times (older workout)" : ""}</div>
+      </div>` : ""}
       ${prs ? `<div class="prs">${prs}</div>` : ""}
       ${w.notes ? `<p>${esc(w.notes)}</p>` : ""}
       ${exs}
@@ -842,7 +848,7 @@ class HealthAssistantPanel extends HTMLElement {
           <div><div class="muted small">Carbs</div><b>${r0(e.carbs_g)} g</b></div>
           <div><div class="muted small">Fat</div><b>${r0(e.fat_g)} g</b></div>
         </div>
-        <div class="muted small">${esc(e.formula || "")} · ${esc(e.activity_label || "")} (×${e.activity_multiplier ?? "–"}) · ${r0(e.steps_used ?? p.daily_steps)} steps/day${e.steps_source === "tracked" ? " (iPhone, 14-day avg)" : ""} · ${e.lifting?.active ? `${r1(e.lifting.hours_per_week)} h lifting/wk (${r1(e.lifting.sessions_per_week)} workouts, 4-week avg)` : `${p.lifting_days} lifting day${p.lifting_days === 1 ? "" : "s"}/wk${e.lifting?.days_logged ? ` · switches to your logged workouts in ${Math.max(0, 14 - e.lifting.days_logged)} days` : ""}`}</div>
+        <div class="muted small">${esc(e.formula || "")} · ${esc(e.activity_label || "")} (×${e.activity_multiplier ?? "–"}) · ${r0(e.steps_used ?? p.daily_steps)} steps/day${e.steps_source === "tracked" ? " (iPhone, 14-day avg)" : ""} · ${e.lifting?.active ? `~${r0(e.lifting.kcal_per_day)} kcal/day from lifting (${r1(e.lifting.sessions_per_week)} workouts/wk, 4-week avg)` : `${p.lifting_days} lifting day${p.lifting_days === 1 ? "" : "s"}/wk${e.lifting?.days_logged ? ` · switches to your logged workouts in ${Math.max(0, 14 - e.lifting.days_logged)} days` : ""}`}</div>
         <div class="muted small">Protein: ${esc(e.protein_rule || "")} of body weight</div>
         ${manual ? `<div class="muted small">Calculated target: ${r0(e.target_auto)} kcal</div>` : e.daily_adjustment ? `<div class="muted small">${e.daily_adjustment < 0 ? "Deficit" : "Surplus"} of ${r0(Math.abs(e.daily_adjustment))} kcal/day for ${r1(u.wOut(p.goal_rate_kg_week, 2))} ${u.w}/week${e.target_floored ? " (raised to a safe minimum)" : ""}</div>` : ""}
       </div>
@@ -937,7 +943,7 @@ class HealthAssistantPanel extends HTMLElement {
         : `<label>Height (cm)<input data-p="cm" inputmode="decimal" value="${r1(hcm)}"></label>`}
       <div class="grid2">
         <label>Avg steps / day${stepsTracked ? `<input value="${r0(e.steps_used)} (tracked)" disabled>` : `<input data-p="steps" inputmode="numeric" value="${p.daily_steps}">`}</label>
-        <label>Lifting days / week${lift.active ? `<input value="${r1(lift.hours_per_week)} h/wk (tracked)" disabled>` : `<input data-p="lift" inputmode="numeric" value="${p.lifting_days}">`}</label>
+        <label>Lifting days / week${lift.active ? `<input value="~${r0(lift.kcal_per_day)} kcal/day (tracked)" disabled>` : `<input data-p="lift" inputmode="numeric" value="${p.lifting_days}">`}</label>
       </div>
       ${stepsTracked || lift.active ? `<p class="muted small">Tracked values come from your iPhone's step counter and your logged workouts, and update automatically.</p>` : ""}
       <label>Goal pace (${u.w}/week)<input data-p="rate" inputmode="decimal" value="${u.wOut(p.goal_rate_kg_week, 2)}"></label>
@@ -985,6 +991,7 @@ class HealthAssistantPanel extends HTMLElement {
         <div class="grid2"><label>Muscle group<input data-nx="muscle" placeholder="e.g. Chest"></label>
         <label>Equipment<input data-nx="equipment" placeholder="e.g. Cable"></label></div>
         <label>Tracks<select data-nx="kind"><option value="weight_reps">Weight & reps</option><option value="bodyweight_reps">Bodyweight reps</option><option value="duration">Time</option><option value="distance">Distance & time</option></select></label>
+        <label>Type (for calories)<select data-nx="tier"><option value="1">Heavy full-body lift (squat, deadlift)</option><option value="2">Compound (bench, rows, pull-ups)</option><option value="3" selected>Machine or supported compound (leg press, lunges)</option><option value="4">Isolation (curls, raises, extensions)</option></select></label>
         <button class="btn primary full" data-action="createExercise">Create & add</button></div></details>`;
   }
 
@@ -1186,6 +1193,7 @@ class HealthAssistantPanel extends HTMLElement {
     const rpe = await new Promise((resolve) => this._openSheet({ kind: "effort", subtitle: `${this._exName(ex.exercise_id)} · ${this._setText(ex.exercise_id, x)}`, resolve, onClose: () => resolve(undefined) }));
     if (rpe === undefined) { this._render(); return; } // dismissed: leave the set unchecked
     x.rpe = rpe; x.completed = true;
+    x.completed_at = new Date().toISOString(); // real rest lengths feed the calorie estimate
     this._queueWorkoutSave();
     // Supersets: only rest after the last exercise in the group.
     const group = ex.superset ? s.active.exercises.filter((o) => o.superset === ex.superset) : [ex];
@@ -1287,7 +1295,8 @@ class HealthAssistantPanel extends HTMLElement {
           s.tab = "history"; localStorage.setItem("ha-health-tab", "history");
           await this._loadTab(); this._render();
           this._openSheet({ kind: "html", html: this._sheetWorkout(w) });
-          this._toast(prCount(w) ? `Workout saved — ${prCount(w)} new PR${prCount(w) > 1 ? "s" : ""}! 🏆` : "Workout saved");
+          const kc = w.summary?.kcal_active != null ? ` · ${r0(w.summary.kcal_active)} kcal` : "";
+          this._toast(prCount(w) ? `Workout saved${kc} — ${prCount(w)} new PR${prCount(w) > 1 ? "s" : ""}! 🏆` : `Workout saved${kc}`);
           break;
         }
         case "discardWorkout":
@@ -1299,7 +1308,7 @@ class HealthAssistantPanel extends HTMLElement {
         case "exMuscle": this._sheet.muscle = d.m; this._renderSheet(); break;
         case "createExercise": {
           const get = (k) => this.shadowRoot.querySelector(`[data-nx="${k}"]`)?.value;
-          const ex = await this.ws("exercises/create", { exercise: { name: get("name"), muscle: get("muscle"), equipment: get("equipment"), kind: get("kind") } });
+          const ex = await this.ws("exercises/create", { exercise: { name: get("name"), muscle: get("muscle"), equipment: get("equipment"), kind: get("kind"), tier: Number(get("tier")) } });
           s.exercises.push(ex); this._exMap[ex.id] = ex;
           const sh = this._sheet; s.sheets.pop(); this._renderSheet(); await sh.onPick(ex.id); break;
         }
@@ -1320,7 +1329,7 @@ class HealthAssistantPanel extends HTMLElement {
         }
         case "toggleSet": {
           const x = s.active.exercises[+d.e].sets[+d.s];
-          if (x.completed) { x.completed = false; x.rpe = null; this._queueWorkoutSave(); this._render(); }
+          if (x.completed) { x.completed = false; x.rpe = null; x.completed_at = null; this._queueWorkoutSave(); this._render(); }
           else await this._completeSet(+d.e, +d.s);
           break;
         }
@@ -1737,6 +1746,8 @@ main { flex:1 1 auto; min-height:0; overflow-y:auto; -webkit-overflow-scrolling:
 .setbadge.drop { background:color-mix(in srgb, var(--drop) 20%, transparent); color:var(--drop); }
 .setbadge.fail { background:color-mix(in srgb, var(--fail) 18%, transparent); color:var(--fail); }
 .warntitle { color:#d97706; } .warntitle ha-icon { --mdc-icon-size:22px; }
+.kcalbox { display:grid; grid-template-columns:auto auto 1fr; gap:4px 18px; align-items:center; background:var(--hp-fill); border-radius:12px; padding:10px 14px; margin:4px 0 10px; }
+.kcalbox .big { color:#ff6b00; } .kcalsplit { line-height:1.4; }
 .actions { display:flex; gap:8px; justify-content:flex-end; margin-top:16px; flex-wrap:wrap; }
 .histrow { padding:8px 0; border-top:1px solid var(--hp-line); }
 .hero { text-align:center; padding:24px 16px; }

@@ -13,7 +13,7 @@ import uuid
 from datetime import date, datetime, timedelta
 from typing import Any, Callable
 
-from .calculations import calculate_energy, estimated_1rm
+from .calculations import calculate_energy, estimated_1rm, workout_calories
 from .const import MEALS, SET_TYPES, VITAL_TYPES
 
 RECENT_FOODS_MAX = 40
@@ -144,6 +144,7 @@ class HealthModel:
             daily_steps=int(self.steps_for_energy()[0]),
             lifting_days=float(self.profile.get("lifting_days") or 0),
             lifting_hours_per_week=lift["hours_per_week"] if lift["active"] else None,
+            lifting_kcal_per_day=lift["kcal_per_day"] if lift["active"] else None,
             target_weight_kg=self.profile.get("target_weight_kg"),
             goal_rate_kg_week=float(self.profile.get("goal_rate_kg_week") or 0),
         )
@@ -190,20 +191,41 @@ class HealthModel:
         span_days = (now - min(ts(w["started_at"]) for w in ws)).days
         window = min(LIFT_WINDOW_DAYS, max(span_days, 1))
         cutoff = now - timedelta(days=window)
-        hours = sessions = 0.0
+        hours = sessions = kcal = 0.0
         for w in ws:
             if ts(w["started_at"]) < cutoff:
                 continue
             dur = (w.get("summary") or {}).get("duration_s") or 0
             hours += min(dur / 3600, LIFT_MAX_SESSION_H)
             sessions += 1
+            kcal += self.workout_kcal(w)["kcal_active"]
         weeks = window / 7
         return {
             "active": span_days >= LIFT_TRACK_MIN_DAYS,
             "days_logged": span_days,
             "hours_per_week": round(hours / weeks, 2),
             "sessions_per_week": round(sessions / weeks, 1),
+            "kcal_per_week": round(kcal / weeks),
+            "kcal_per_day": round(kcal / window),
         }
+
+    def weight_at(self, iso: str | None) -> float | None:
+        """Body weight logged at or before a moment (falls back to the latest)."""
+        if iso:
+            prior = [v for v in self.data["vitals"] if v["type"] == "weight" and v["recorded_at"] <= iso]
+            if prior:
+                return max(prior, key=lambda v: v["recorded_at"])["value"]
+        return self.current_weight()
+
+    def workout_kcal(self, w: dict) -> dict:
+        """Calories for a workout (stored at finish; computed on the fly for older ones)."""
+        sm = w.get("summary") or {}
+        if "kcal_active" in sm:
+            return {k: sm[k] for k in ("kcal_total", "kcal_active", "active_min", "rest_min", "idle_min", "avg_met", "timed") if k in sm}
+        lib = {e["id"]: e for e in self.exercises()}
+        res = workout_calories(w, lib, self.weight_at(w.get("started_at")))
+        res.pop("by_exercise", None)
+        return res
 
     def workout_calendar(self, year: int, month: int) -> list[dict]:
         prefix = f"{year:04d}-{month:02d}-"
@@ -454,6 +476,7 @@ class HealthModel:
             "muscle": ex.get("muscle") or "Other",
             "equipment": ex.get("equipment") or "Other",
             "kind": ex.get("kind") or "weight_reps",
+            "tier": int(ex["tier"]) if ex.get("tier") in (1, 2, 3, 4, "1", "2", "3", "4") else 3,
             "instructions": [],
             "demo_url": None,
             "custom": True,
@@ -572,6 +595,10 @@ class HealthModel:
         workout["exercises"] = [e for e in workout["exercises"] if e["sets"]]
         workout["prs"] = self._detect_prs(workout)
         workout["summary"] = self.workout_summary(workout)
+        lib = {e["id"]: e for e in self.exercises()}
+        cal = workout_calories(workout, lib, self.weight_at(workout["started_at"]))
+        workout["summary"].update({k: v for k, v in cal.items() if k != "by_exercise"})
+        workout["summary"]["kcal_by_exercise"] = cal["by_exercise"]
         self.data["workouts"].append(workout)
         self.data["active_workout"] = None
         self._changed()
@@ -602,7 +629,14 @@ class HealthModel:
 
     def workout_list(self, offset: int = 0, limit: int = 30) -> dict:
         items = sorted(self.data["workouts"], key=lambda w: w["started_at"], reverse=True)
-        return {"total": len(items), "items": items[offset: offset + limit]}
+        page = items[offset: offset + limit]
+        # Older workouts (before the calorie engine) get their numbers worked out for display.
+        out = []
+        for w in page:
+            if "kcal_active" not in (w.get("summary") or {}):
+                w = {**w, "summary": {**(w.get("summary") or {}), **self.workout_kcal(w)}}
+            out.append(w)
+        return {"total": len(items), "items": out}
 
     @staticmethod
     def workout_summary(workout: dict) -> dict:

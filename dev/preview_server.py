@@ -105,7 +105,7 @@ def save() -> None:
         json.dump(DATA, fh)
 
 
-M = model_mod.HealthModel(DATA, save, datetime.now, library=library.all,
+M = model_mod.HealthModel(DATA, save, lambda: datetime.now().astimezone(), library=library.all,
                           emit=lambda ev, payload: print(f"[live activity] {ev}"))
 save()
 

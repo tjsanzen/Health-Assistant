@@ -240,6 +240,57 @@ def test_lifting_switches_to_logged_workouts_after_two_weeks():
     assert cal and all(d["count"] >= 1 for d in cal)
 
 
+def test_calorie_engine_hand_check():
+    """One exercise, two timed sets, known rest: check against arithmetic by hand."""
+    lib = {"squat": {"id": "squat", "kind": "weight_reps", "tier": 1}}
+    w = {"started_at": "2026-11-10T18:00:00", "ended_at": "2026-11-10T18:05:00", "exercises": [{
+        "exercise_id": "squat", "rest_s": 120, "sets": [
+            {"type": "working", "reps": 10, "rpe": 8, "completed": True, "completed_at": "2026-11-10T18:01:00"},
+            {"type": "working", "reps": 10, "rpe": 10, "completed": True, "completed_at": "2026-11-10T18:04:00"},
+        ]}]}
+    r = calc.workout_calories(w, lib, 100)
+    set_s = 10 * calc.SECONDS_PER_REP + calc.SET_SETUP_S          # 50 s per set
+    met1, met2 = 8.0 * 1.1, 8.0 * 1.2                            # tier 1, RPE 8 and 10
+    rest_met = met1 * calc.REST_FRACTION
+    gap = 180 - set_s                                            # within 120 s + 60 s grace
+    lead, tail = 60 - set_s, 60
+    segs = [(set_s, met1), (set_s, met2), (gap, rest_met), (lead, 2.0), (tail, 2.0)]
+    exp = sum(t * m for t, m in segs) / 60 * 100 / 60
+    exp_active = sum(t * (m - 1) for t, m in segs) / 60 * 100 / 60
+    assert r["timed"] and r["kcal_total"] == round(exp) and r["kcal_active"] == round(exp_active)
+
+
+def test_calorie_engine_long_break_decays_and_untimed_fallback():
+    lib = {"curl": {"id": "curl", "kind": "weight_reps", "tier": 4}, "bench": {"id": "bench", "tier": 2}}
+    base = {"started_at": "2026-11-10T18:00:00", "ended_at": "2026-11-10T19:00:00"}
+    sets = lambda t1, t2: [{"type": "working", "reps": 10, "completed": True, "completed_at": t1},
+                           {"type": "working", "reps": 10, "completed": True, "completed_at": t2}]
+    short = calc.workout_calories({**base, "exercises": [{"exercise_id": "curl", "rest_s": 90, "sets": sets("2026-11-10T18:01:00", "2026-11-10T18:03:00")}]}, lib, 80)
+    long_ = calc.workout_calories({**base, "exercises": [{"exercise_id": "curl", "rest_s": 90, "sets": sets("2026-11-10T18:01:00", "2026-11-10T18:15:00")}]}, lib, 80)
+    assert long_["idle_min"] > 10 and long_["kcal_total"] > short["kcal_total"]
+    # A 14-minute break mostly counts at the resting rate: far less than lifting through it.
+    assert long_["kcal_active"] - short["kcal_active"] < 15
+    # No tick times: falls back to the planned rest, and a heavier tier burns more.
+    untimed = {"started_at": "x", "exercises": [{"exercise_id": "bench", "rest_s": 120, "sets": [{"type": "working", "reps": 8, "completed": True}] * 3}]}
+    r = calc.workout_calories(untimed, lib, 80)
+    assert not r["timed"] and r["rest_min"] == 4.0 and r["kcal_active"] > 0
+    assert calc.rpe_multiplier(None, "warmup") == 0.85 and calc.rpe_multiplier(9.5) == 1.2
+
+
+def test_finished_workout_stores_calories():
+    m, clock, _ = make()
+    w = m.start_workout()
+    t0 = clock.t
+    w["exercises"].append({"id": "a", "exercise_id": "squat", "rest_s": 120, "sets": [
+        {"id": str(i), "type": "working", "weight": 100, "reps": 5, "rpe": 8, "completed": True,
+         "completed_at": (t0 + timedelta(minutes=2 * i + 1)).isoformat()} for i in range(3)]})
+    m.update_active_workout(w)
+    clock.t += timedelta(minutes=8)
+    done = m.finish_workout()
+    sm = done["summary"]
+    assert sm["timed"] and 0 < sm["kcal_active"] < sm["kcal_total"] and "squat" in sm["kcal_by_exercise"]
+
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_"):

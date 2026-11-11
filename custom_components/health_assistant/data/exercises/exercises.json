@@ -4,6 +4,7 @@
     "muscle": "Chest",
     "equipment": "Barbell",
     "kind": "weight_reps",
+    "tier": 2,
     "instructions": [],
     "demo": "bench_press.gif"
   },
@@ -12,6 +13,7 @@
     "muscle": "Chest",
     "equipment": "Barbell",
     "kind": "weight_reps",
+    "tier": 2,
     "instructions": [],
     "demo": "incline_bench_press.gif"
   },
@@ -20,6 +22,7 @@
     "muscle": "Chest",
     "equipment": "Dumbbell",
     "kind": "weight_reps",
+    "tier": 2,
     "instructions": [],
     "demo": "db_bench_press.gif"
   },
@@ -28,6 +31,7 @@
     "muscle": "Chest",
     "equipment": "Dumbbell",
     "kind": "weight_reps",
+    "tier": 2,
     "instructions": [],
     "demo": "incline_db_press.gif"
   },
@@ -36,6 +40,7 @@
     "muscle": "Chest",
     "equipment": "Machine",
     "kind": "weight_reps",
+    "tier": 4,
     "instructions": [],
     "demo": "chest_fly_machine.gif"
   },
@@ -44,6 +49,7 @@
     "muscle": "Chest",
     "equipment": "Cable",
     "kind": "weight_reps",
+    "tier": 4,
     "instructions": [],
     "demo": "cable_crossover.gif"
   },
@@ -52,6 +58,7 @@
     "muscle": "Chest",
     "equipment": "Bodyweight",
     "kind": "bodyweight_reps",
+    "tier": 3,
     "instructions": [],
     "demo": "push_up.gif"
   },
@@ -60,6 +67,7 @@
     "muscle": "Chest",
     "equipment": "Bodyweight",
     "kind": "bodyweight_reps",
+    "tier": 2,
     "instructions": [],
     "demo": "dip.gif"
   },
@@ -68,6 +76,7 @@
     "muscle": "Back",
     "equipment": "Barbell",
     "kind": "weight_reps",
+    "tier": 1,
     "instructions": [],
     "demo": "deadlift.gif"
   },
@@ -76,6 +85,7 @@
     "muscle": "Back",
     "equipment": "Barbell",
     "kind": "weight_reps",
+    "tier": 2,
     "instructions": [],
     "demo": "barbell_row.gif"
   },
@@ -84,6 +94,7 @@
     "muscle": "Back",
     "equipment": "Dumbbell",
     "kind": "weight_reps",
+    "tier": 3,
     "instructions": [],
     "demo": "db_row.gif"
   },
@@ -92,6 +103,7 @@
     "muscle": "Back",
     "equipment": "Cable",
     "kind": "weight_reps",
+    "tier": 2,
     "instructions": [],
     "demo": "lat_pulldown.gif"
   },
@@ -100,6 +112,7 @@
     "muscle": "Back",
     "equipment": "Cable",
     "kind": "weight_reps",
+    "tier": 3,
     "instructions": [],
     "demo": "seated_cable_row.gif"
   },
@@ -108,6 +121,7 @@
     "muscle": "Back",
     "equipment": "Bodyweight",
     "kind": "bodyweight_reps",
+    "tier": 2,
     "instructions": [],
     "demo": "pull_up.gif"
   },
@@ -116,6 +130,7 @@
     "muscle": "Back",
     "equipment": "Bodyweight",
     "kind": "bodyweight_reps",
+    "tier": 2,
     "instructions": [],
     "demo": "chin_up.gif"
   },
@@ -124,6 +139,7 @@
     "muscle": "Back",
     "equipment": "Machine",
     "kind": "weight_reps",
+    "tier": 2,
     "instructions": [],
     "demo": "t_bar_row.gif"
   },
@@ -132,6 +148,7 @@
     "muscle": "Legs",
     "equipment": "Barbell",
     "kind": "weight_reps",
+    "tier": 1,
     "instructions": [],
     "demo": "squat.gif"
   },
@@ -140,6 +157,7 @@
     "muscle": "Legs",
     "equipment": "Barbell",
     "kind": "weight_reps",
+    "tier": 1,
     "instructions": [],
     "demo": "front_squat.gif"
   },
@@ -148,6 +166,7 @@
     "muscle": "Legs",
     "equipment": "Barbell",
     "kind": "weight_reps",
+    "tier": 1,
     "instructions": [],
     "demo": "romanian_deadlift.gif"
   },
@@ -156,6 +175,7 @@
     "muscle": "Legs",
     "equipment": "Machine",
     "kind": "weight_reps",
+    "tier": 3,
     "instructions": [],
     "demo": "leg_press.gif"
   },
@@ -164,6 +184,7 @@
     "muscle": "Legs",
     "equipment": "Machine",
     "kind": "weight_reps",
+    "tier": 4,
     "instructions": [],
     "demo": "leg_extension.gif"
   },
@@ -172,6 +193,7 @@
     "muscle": "Legs",
     "equipment": "Machine",
     "kind": "weight_reps",
+    "tier": 4,
     "instructions": [],
     "demo": "leg_curl.gif"
   },
@@ -180,6 +202,7 @@
     "muscle": "Legs",
     "equipment": "Dumbbell",
     "kind": "weight_reps",
+    "tier": 3,
     "instructions": [],
     "demo": "bulgarian_split_squat.gif"
   },
@@ -188,6 +211,7 @@
     "muscle": "Legs",
     "equipment": "Dumbbell",
     "kind": "weight_reps",
+    "tier": 3,
     "instructions": [],
     "demo": "walking_lunge.gif"
   },
@@ -196,6 +220,7 @@
     "muscle": "Legs",
     "equipment": "Barbell",
     "kind": "weight_reps",
+    "tier": 2,
     "instructions": [],
     "demo": "hip_thrust.gif"
   },
@@ -204,6 +229,7 @@
     "muscle": "Legs",
     "equipment": "Machine",
     "kind": "weight_reps",
+    "tier": 4,
     "instructions": [],
     "demo": "calf_raise.gif"
   },
@@ -212,6 +238,7 @@
     "muscle": "Legs",
     "equipment": "Dumbbell",
     "kind": "weight_reps",
+    "tier": 3,
     "instructions": [],
     "demo": "goblet_squat.gif"
   },
@@ -220,6 +247,7 @@
     "muscle": "Shoulders",
     "equipment": "Barbell",
     "kind": "weight_reps",
+    "tier": 2,
     "instructions": [],
     "demo": "overhead_press.gif"
   },
@@ -228,6 +256,7 @@
     "muscle": "Shoulders",
     "equipment": "Dumbbell",
     "kind": "weight_reps",
+    "tier": 2,
     "instructions": [],
     "demo": "db_shoulder_press.gif"
   },
@@ -236,6 +265,7 @@
     "muscle": "Shoulders",
     "equipment": "Dumbbell",
     "kind": "weight_reps",
+    "tier": 4,
     "instructions": [],
     "demo": "lateral_raise.gif"
   },
@@ -247,6 +277,7 @@
     ],
     "equipment": "Cable",
     "kind": "weight_reps",
+    "tier": 4,
     "instructions": [
       "Set a single cable pulley to its lowest position and attach a D-handle.",
       "Stand side-on to the machine and grab the handle with your far hand, cable running across the front of your body.",
@@ -255,7 +286,7 @@
     ],
     "tips": [
       "Lead with the elbow, not the hand.",
-      "Keep your torso still \u2014 no swinging."
+      "Keep your torso still — no swinging."
     ],
     "demo": "lateral_raise_cable.gif"
   },
@@ -264,6 +295,7 @@
     "muscle": "Shoulders",
     "equipment": "Dumbbell",
     "kind": "weight_reps",
+    "tier": 4,
     "instructions": [],
     "demo": "rear_delt_fly.gif"
   },
@@ -272,6 +304,7 @@
     "muscle": "Shoulders",
     "equipment": "Cable",
     "kind": "weight_reps",
+    "tier": 4,
     "instructions": [],
     "demo": "face_pull.gif"
   },
@@ -280,6 +313,7 @@
     "muscle": "Arms",
     "equipment": "Barbell",
     "kind": "weight_reps",
+    "tier": 4,
     "instructions": [],
     "demo": "barbell_curl.gif"
   },
@@ -288,6 +322,7 @@
     "muscle": "Arms",
     "equipment": "Dumbbell",
     "kind": "weight_reps",
+    "tier": 4,
     "instructions": [],
     "demo": "db_curl.gif"
   },
@@ -296,6 +331,7 @@
     "muscle": "Arms",
     "equipment": "Dumbbell",
     "kind": "weight_reps",
+    "tier": 4,
     "instructions": [],
     "demo": "hammer_curl.gif"
   },
@@ -304,6 +340,7 @@
     "muscle": "Arms",
     "equipment": "Cable",
     "kind": "weight_reps",
+    "tier": 4,
     "instructions": [],
     "demo": "tricep_pushdown.gif"
   },
@@ -312,6 +349,7 @@
     "muscle": "Arms",
     "equipment": "Barbell",
     "kind": "weight_reps",
+    "tier": 4,
     "instructions": [],
     "demo": "skull_crusher.gif"
   },
@@ -320,6 +358,7 @@
     "muscle": "Arms",
     "equipment": "Dumbbell",
     "kind": "weight_reps",
+    "tier": 4,
     "instructions": [],
     "demo": "overhead_tricep_ext.gif"
   },
@@ -328,6 +367,7 @@
     "muscle": "Core",
     "equipment": "Bodyweight",
     "kind": "duration",
+    "base_met": 3.0,
     "instructions": [],
     "demo": "plank.gif"
   },
@@ -336,6 +376,7 @@
     "muscle": "Core",
     "equipment": "Bodyweight",
     "kind": "bodyweight_reps",
+    "base_met": 3.5,
     "instructions": [],
     "demo": "hanging_leg_raise.gif"
   },
@@ -344,6 +385,7 @@
     "muscle": "Core",
     "equipment": "Cable",
     "kind": "weight_reps",
+    "tier": 4,
     "instructions": [],
     "demo": "cable_crunch.gif"
   },
@@ -352,6 +394,7 @@
     "muscle": "Core",
     "equipment": "Bodyweight",
     "kind": "bodyweight_reps",
+    "base_met": 3.5,
     "instructions": [],
     "demo": "ab_wheel.gif"
   },
@@ -360,6 +403,7 @@
     "muscle": "Cardio",
     "equipment": "Machine",
     "kind": "distance",
+    "base_met": 8.0,
     "instructions": [],
     "demo": "treadmill.gif"
   },
@@ -368,6 +412,7 @@
     "muscle": "Cardio",
     "equipment": "Machine",
     "kind": "distance",
+    "base_met": 7.0,
     "instructions": [],
     "demo": "rowing_machine.gif"
   },
@@ -376,6 +421,7 @@
     "muscle": "Cardio",
     "equipment": "Machine",
     "kind": "duration",
+    "base_met": 6.0,
     "instructions": [],
     "demo": "stationary_bike.gif"
   },
@@ -384,6 +430,7 @@
     "muscle": "Cardio",
     "equipment": "Machine",
     "kind": "duration",
+    "base_met": 8.0,
     "instructions": [],
     "demo": "stair_climber.gif"
   }

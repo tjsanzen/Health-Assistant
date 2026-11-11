@@ -118,8 +118,11 @@ class AppleHealthExport:
         start = datetime.fromisoformat(w["started_at"])
         end = datetime.fromisoformat(w["ended_at"]) if w.get("ended_at") else dt_util.now()
         minutes = max(1, round((end - start).total_seconds() / 60))
-        weight = self.model.current_weight() or 75
-        kcal = round(STRENGTH_MET * weight * minutes / 60)
+        # Active calories from the per-set engine (Apple Health "Active Energy" excludes resting burn).
+        kcal = self.model.workout_kcal(w).get("kcal_active")
+        if kcal is None:
+            weight = self.model.current_weight() or 75
+            kcal = round((STRENGTH_MET - 1) * weight * minutes / 60)
         return {
             "workout_id": w["id"], "title": w.get("name") or "Workout",
             "start": start.isoformat(), "end": end.isoformat(),
