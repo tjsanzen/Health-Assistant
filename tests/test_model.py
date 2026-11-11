@@ -211,6 +211,35 @@ def test_rest_timer_and_events():
     assert [e for e in m.events if e != "profile_updated"] == ["workout_started", "rest", "workout_ended"]
 
 
+def test_protein_rule():
+    e = calc.calculate_energy(weight_kg=90.72, height_cm=180, age=30, sex="male", body_fat_pct=None,
+                              daily_steps=5000, lifting_days=3, target_weight_kg=85, goal_rate_kg_week=0.25)
+    assert round(e.protein_g) == 120  # 200 lb × 0.6
+    e = calc.calculate_energy(weight_kg=90.72, height_cm=180, age=30, sex="male", body_fat_pct=12,
+                              daily_steps=5000, lifting_days=3, target_weight_kg=85, goal_rate_kg_week=0.25)
+    assert round(e.protein_g) == 180  # lean: 200 lb × 0.9
+
+
+def test_lifting_switches_to_logged_workouts_after_two_weeks():
+    m, clock, _ = make()
+    start = clock.t
+    for day in (0, 3, 6, 9):
+        clock.t = start + timedelta(days=day)
+        w = m.start_workout()
+        w["exercises"].append({"id": "a", "exercise_id": "squat", "sets": [{"id": "1", "type": "working", "weight": 100, "reps": 5, "completed": True}]})
+        m.update_active_workout(w)
+        clock.t += timedelta(minutes=90)
+        m.finish_workout()
+    clock.t = start + timedelta(days=10)
+    assert not m.lifting_tracked()["active"]            # only 10 days in
+    clock.t = start + timedelta(days=15)
+    lt = m.lifting_tracked()
+    assert lt["active"] and abs(lt["hours_per_week"] - 6 / (15 / 7)) < 0.05
+    assert m.energy()["lifting"]["active"]
+    cal = m.workout_calendar(start.year, start.month)
+    assert cal and all(d["count"] >= 1 for d in cal)
+
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_"):

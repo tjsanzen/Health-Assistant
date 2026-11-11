@@ -10,7 +10,7 @@ from homeassistant.helpers import selector
 from homeassistant.util import slugify
 from homeassistant.util.unit_system import METRIC_SYSTEM
 
-from .calculations import calculate_energy
+from .calculations import MAX_SAFE_DEFICIT, calculate_energy
 from .iphone import step_sensor_for_phone
 from .const import (
     CM_PER_IN, CONF_AGE, CONF_BODY_FAT, CONF_GOAL_RATE, CONF_GOAL_RATE_INPUT, CONF_HEIGHT,
@@ -179,5 +179,11 @@ class HealthAssistantConfigFlow(ConfigFlow, domain=DOMAIN):
                 "fat": f"{e.fat_g:.0f}",
                 "carbs": f"{e.carbs_g:.0f}",
                 "floor_note": " (raised to the safe minimum)" if e.target_floored else "",
+                "deficit_warning": (
+                    f"\n\n⚠️ **Warning!** This is a deficit of {abs(e.daily_adjustment):,.0f} kcal/day. "
+                    "Modern research suggests that a caloric deficit of more than 500-600 calories per day can be "
+                    "dangerous, and cause you to lose fat and muscle, even with high protein intake. "
+                    "We suggest a smaller deficit — go back and lower your weekly goal."
+                ) if e.daily_adjustment < -MAX_SAFE_DEFICIT else "",
             },
         )

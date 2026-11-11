@@ -13,6 +13,13 @@ BASELINE_STEPS = 3000
 KCAL_PER_STEP_PER_KG = 0.0005
 # Resistance training ~5 METs; subtract the 1 MET you'd burn anyway.
 LIFT_NET_MET = 4.0
+LB_PER_KG = 2.2046226218
+# Protein suggestion: 0.6 g per lb of body weight, or 0.9 g/lb when lean (< 15 % body fat).
+PROTEIN_G_PER_LB = 0.6
+PROTEIN_G_PER_LB_LEAN = 0.9
+LEAN_BODY_FAT_PCT = 15
+# Deficits bigger than this trigger a warning in the app.
+MAX_SAFE_DEFICIT = 600
 
 MIN_KCAL = {"male": 1500, "female": 1200}
 
@@ -71,7 +78,8 @@ def calculate_energy(
     sex: str,
     body_fat_pct: float | None,
     daily_steps: int,
-    lifting_days: int,
+    lifting_days: float,
+    lifting_hours_per_week: float | None = None,
     target_weight_kg: float | None,
     goal_rate_kg_week: float,
 ) -> EnergyResult:
@@ -87,7 +95,9 @@ def calculate_energy(
 
     base = bmr * SEDENTARY_FACTOR
     step_kcal = max(0, daily_steps - BASELINE_STEPS) * KCAL_PER_STEP_PER_KG * weight_kg
-    lifting_kcal = lifting_days * 1.0 * LIFT_NET_MET * weight_kg / 7
+    # Logged training time wins over the "days per week × 1 hour" setup answer.
+    hours = lifting_hours_per_week if lifting_hours_per_week is not None else lifting_days * 1.0
+    lifting_kcal = hours * LIFT_NET_MET * weight_kg / 7
     maintenance = base + step_kcal + lifting_kcal
     multiplier = maintenance / bmr
 
@@ -112,8 +122,9 @@ def calculate_energy(
     if floored:
         target = float(floor)
 
-    # Macros: protein from lean mass when known, else body weight; fat 25 %.
-    protein_g = (2.2 * lean) if lean else (1.6 * weight_kg)
+    # Macros: protein per lb of body weight (more when lean); fat 25 %; carbs the rest.
+    per_lb = PROTEIN_G_PER_LB_LEAN if body_fat_pct and body_fat_pct < LEAN_BODY_FAT_PCT else PROTEIN_G_PER_LB
+    protein_g = weight_kg * LB_PER_KG * per_lb
     fat_g = target * 0.25 / 9
     carbs_g = max(0.0, (target - protein_g * 4 - fat_g * 9) / 4)
 

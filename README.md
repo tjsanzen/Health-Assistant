@@ -81,6 +81,25 @@ The countdown ticks on the phone itself, so it keeps going with the panel closed
 
 Requires Companion app 2026.9+, iOS 17.2+ and Home Assistant 2026.7+. Live Activities must also be allowed for Home Assistant in iPhone Settings, and the phone needs to reach HA (remote access when you're at the gym). Apple ends Live Activities after 8 hours and limits how many can be started in a row.
 
+## Dashboard cards
+
+The integration loads three cards on every dashboard, so there's no resource to add. Find them under **Add card**, or add them in YAML:
+
+```yaml
+type: custom:health-assistant-lift-calendar   # this month, days you lifted circled in green (‹ › to change month)
+---
+type: custom:health-assistant-calorie-gauge   # today's calories as a speedometer against your target
+---
+type: custom:health-assistant-log-meal        # a button that opens a "Log a meal" dialog
+name: Log meal                                # optional
+icon: mdi:silverware-fork-knife               # optional
+```
+
+- **Profile:** every card takes an optional `profile: Anna` (a profile name or id). By default it uses the profile linked to whoever is signed in.
+- **Title:** the calendar and gauge also take an optional `title:`.
+- **Gauge colours:** blue up to 90% of your target, green within ±10%, red when you're over.
+- **Log a meal dialog:** OpenNutrition search, recent foods and Quick add, logged to the meal you pick.
+
 ## Steps from your iPhone
 
 When you pick your phone during setup, Health Assistant connects that phone's Companion app step sensor (`sensor.<phone>_steps`). You can change it under Profile → iPhone, rest timer & Apple Health.
@@ -116,7 +135,9 @@ The input also includes `title`, `end` and `workout_id` if you want them. The fi
   
   The implied activity multiplier and label (Sedentary → Extremely active) are shown in the panel.
 - **Target**: maintenance ± (goal pace × 7,700 kcal/kg ÷ 7). The direction comes from target vs current weight; within 0.5 kg counts as maintain. The target never drops below 1,500 kcal (male) or 1,200 kcal (female).
-- **Macros**: protein 2.2 g/kg lean mass (or 1.6 g/kg body weight without body fat), fat 25% of calories, carbs the rest.
+- **Lifting**: until you've been logging workouts for 2 weeks, lifting calories come from the "days per week" setup answer, at 1 hour each. After that, they come from your actual logged training time: the last 4 weeks of workout durations, with each session capped at 3 hours in case you forget to press Finish. The setup answer is then locked, and the Profile shows your hours per week.
+- **Protein**: 0.6 g per lb of body weight, or 0.9 g/lb if your latest body fat is under 15%. Fat is 25% of calories and carbs are the rest.
+- **Deficit warning**: if a target works out to more than 600 kcal/day below maintenance, Health Assistant shows a warning you can override. This applies in setup, under Daily targets and under Body & goal.
 - **Manual targets** (Profile → Daily targets → Edit) replace any of these. With only calories set, protein stays calculated, fat is 25% and carbs fill the rest; with fixed protein/fat, carbs fill whatever calories are left.
 - **Nutrition averages** count only days you logged something, and leave out today because it isn't finished.
 - Current weight, body fat and height always come from your **latest logged health stat**, so the targets update as you log.

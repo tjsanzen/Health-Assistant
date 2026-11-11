@@ -29,6 +29,9 @@ PROFILE_FIELDS = {
     "steps_sensor", "apple_health_export", "apple_health_shortcut",
 }
 STEPS_AVG_DAYS = 14
+LIFT_TRACK_MIN_DAYS = 14   # logging this long switches activity to logged workouts
+LIFT_WINDOW_DAYS = 28      # average training time over the last 4 weeks
+LIFT_MAX_SESSION_H = 3.0   # cap forgotten-to-finish workouts
 STEPS_MIN_DAYS = 3  # need this many tracked days before replacing the typed-in average
 COUNTED_SET_TYPES = {"working", "failure", "drop"}  # warm-ups never count toward records
 
@@ -131,6 +134,7 @@ class HealthModel:
         height = self.current_height()
         if not weight or not height:
             return None
+        lift = self.lifting_tracked()
         res = calculate_energy(
             weight_kg=weight,
             height_cm=height,
@@ -138,12 +142,15 @@ class HealthModel:
             sex=self.profile.get("sex", "male"),
             body_fat_pct=self.current_body_fat(),
             daily_steps=int(self.steps_for_energy()[0]),
-            lifting_days=int(self.profile.get("lifting_days") or 0),
+            lifting_days=float(self.profile.get("lifting_days") or 0),
+            lifting_hours_per_week=lift["hours_per_week"] if lift["active"] else None,
             target_weight_kg=self.profile.get("target_weight_kg"),
             goal_rate_kg_week=float(self.profile.get("goal_rate_kg_week") or 0),
         )
         out = res.as_dict()
         out["steps_used"], out["steps_source"] = self.steps_for_energy()
+        out["lifting"] = lift
+        out["protein_rule"] = "0.9 g/lb (under 15% body fat)" if (self.current_body_fat() or 100) < 15 else "0.6 g/lb"
         # Manual overrides from the Profile tab win over the calculated numbers.
         p = self.profile
         out["target_auto"] = out["target"]
@@ -164,6 +171,48 @@ class HealthModel:
             out["carbs_g"] = round(max(0.0, (out["target"] - out["protein_g"] * 4 - out["fat_g"] * 9) / 4), 1)
         out["macros_manual"] = manual_macros
         return out
+
+    # ---------------------------------------------------------------- lifting
+    def lifting_tracked(self) -> dict:
+        """Training time from logged workouts. Takes over once 2 weeks of lifting are logged."""
+        now = self._now()
+
+        def ts(iso: str) -> datetime:
+            d = datetime.fromisoformat(iso)
+            # Mixed naive/aware timestamps can't be compared; treat naive as local time.
+            if (d.tzinfo is None) != (now.tzinfo is None):
+                d = d.replace(tzinfo=now.tzinfo)
+            return d
+
+        ws = self.data["workouts"]
+        if not ws:
+            return {"active": False, "days_logged": 0, "hours_per_week": None, "sessions_per_week": None}
+        span_days = (now - min(ts(w["started_at"]) for w in ws)).days
+        window = min(LIFT_WINDOW_DAYS, max(span_days, 1))
+        cutoff = now - timedelta(days=window)
+        hours = sessions = 0.0
+        for w in ws:
+            if ts(w["started_at"]) < cutoff:
+                continue
+            dur = (w.get("summary") or {}).get("duration_s") or 0
+            hours += min(dur / 3600, LIFT_MAX_SESSION_H)
+            sessions += 1
+        weeks = window / 7
+        return {
+            "active": span_days >= LIFT_TRACK_MIN_DAYS,
+            "days_logged": span_days,
+            "hours_per_week": round(hours / weeks, 2),
+            "sessions_per_week": round(sessions / weeks, 1),
+        }
+
+    def workout_calendar(self, year: int, month: int) -> list[dict]:
+        prefix = f"{year:04d}-{month:02d}-"
+        days: dict[str, list[str]] = {}
+        for w in self.data["workouts"]:
+            d = w["started_at"][:10]
+            if d.startswith(prefix):
+                days.setdefault(d, []).append(w.get("name") or "Workout")
+        return [{"date": d, "count": len(n), "names": n} for d, n in sorted(days.items())]
 
     # ------------------------------------------------------------------ steps
     def record_steps(self, day: str, steps: int) -> bool:

@@ -291,6 +291,11 @@ def _workout_delete(hass, model, msg):
     return None
 
 
+@command("workout/calendar", {vol.Required("year"): int, vol.Required("month"): int})
+def _workout_calendar(hass, model, msg):
+    return model.workout_calendar(msg["year"], msg["month"])
+
+
 @command("records")
 def _records(hass, model, msg):
     return model.records()

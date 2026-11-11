@@ -26,6 +26,8 @@ const EFFORT = [
   [7, "Moderate", "Could have done 3 more reps"],
   [6, "Easy", "No real effort — 4+ reps left"],
 ];
+const MAX_SAFE_DEFICIT = 600;
+const DEFICIT_WARNING = "Modern research suggests that a caloric deficit of more than 500-600 calories per day can be dangerous, and cause you to lose fat and muscle, even with high protein intake. We suggest a smaller deficit.";
 const REST_OPTIONS = [0, 30, 45, 60, 90, 120, 150, 180, 240, 300];
 const VITALS = {
   weight: { label: "Weight", icon: "mdi:scale-bathroom" },
@@ -840,7 +842,8 @@ class HealthAssistantPanel extends HTMLElement {
           <div><div class="muted small">Carbs</div><b>${r0(e.carbs_g)} g</b></div>
           <div><div class="muted small">Fat</div><b>${r0(e.fat_g)} g</b></div>
         </div>
-        <div class="muted small">${esc(e.formula || "")} · ${esc(e.activity_label || "")} (×${e.activity_multiplier ?? "–"}) · ${r0(e.steps_used ?? p.daily_steps)} steps/day${e.steps_source === "tracked" ? " (iPhone, 14-day avg)" : ""} · ${p.lifting_days} lifting day${p.lifting_days === 1 ? "" : "s"}/wk</div>
+        <div class="muted small">${esc(e.formula || "")} · ${esc(e.activity_label || "")} (×${e.activity_multiplier ?? "–"}) · ${r0(e.steps_used ?? p.daily_steps)} steps/day${e.steps_source === "tracked" ? " (iPhone, 14-day avg)" : ""} · ${e.lifting?.active ? `${r1(e.lifting.hours_per_week)} h lifting/wk (${r1(e.lifting.sessions_per_week)} workouts, 4-week avg)` : `${p.lifting_days} lifting day${p.lifting_days === 1 ? "" : "s"}/wk${e.lifting?.days_logged ? ` · switches to your logged workouts in ${Math.max(0, 14 - e.lifting.days_logged)} days` : ""}`}</div>
+        <div class="muted small">Protein: ${esc(e.protein_rule || "")} of body weight</div>
         ${manual ? `<div class="muted small">Calculated target: ${r0(e.target_auto)} kcal</div>` : e.daily_adjustment ? `<div class="muted small">${e.daily_adjustment < 0 ? "Deficit" : "Surplus"} of ${r0(Math.abs(e.daily_adjustment))} kcal/day for ${r1(u.wOut(p.goal_rate_kg_week, 2))} ${u.w}/week${e.target_floored ? " (raised to a safe minimum)" : ""}</div>` : ""}
       </div>
       <h3 class="section">Settings</h3>
@@ -917,6 +920,9 @@ class HealthAssistantPanel extends HTMLElement {
 
   _sheetProfile() {
     const p = this._s.overview.profile, u = this._units;
+    const e = this._s.overview.energy || {};
+    const lift = e.lifting || {};
+    const stepsTracked = e.steps_source === "tracked";
     const hcm = this._s.overview.latest.height?.value ?? p.height_cm;
     const tin = hcm / 2.54;
     return `<h2>Body & goal</h2><div class="form">
@@ -930,9 +936,10 @@ class HealthAssistantPanel extends HTMLElement {
       ${u.imp ? `<div class="grid2"><label>Height (ft)<input data-p="ft" inputmode="numeric" value="${Math.floor(tin / 12)}"></label><label>Height (in)<input data-p="in" inputmode="decimal" value="${Math.round((tin % 12) * 2) / 2}"></label></div>`
         : `<label>Height (cm)<input data-p="cm" inputmode="decimal" value="${r1(hcm)}"></label>`}
       <div class="grid2">
-        <label>Avg steps / day<input data-p="steps" inputmode="numeric" value="${p.daily_steps}"></label>
-        <label>Lifting days / week<input data-p="lift" inputmode="numeric" value="${p.lifting_days}"></label>
+        <label>Avg steps / day${stepsTracked ? `<input value="${r0(e.steps_used)} (tracked)" disabled>` : `<input data-p="steps" inputmode="numeric" value="${p.daily_steps}">`}</label>
+        <label>Lifting days / week${lift.active ? `<input value="${r1(lift.hours_per_week)} h/wk (tracked)" disabled>` : `<input data-p="lift" inputmode="numeric" value="${p.lifting_days}">`}</label>
       </div>
+      ${stepsTracked || lift.active ? `<p class="muted small">Tracked values come from your iPhone's step counter and your logged workouts, and update automatically.</p>` : ""}
       <label>Goal pace (${u.w}/week)<input data-p="rate" inputmode="decimal" value="${u.wOut(p.goal_rate_kg_week, 2)}"></label>
       <p class="muted small">Current weight and body fat come from your latest logged health stats.</p>
       <button class="btn primary full" data-action="saveProfile">Save</button></div>`;
@@ -1022,7 +1029,7 @@ class HealthAssistantPanel extends HTMLElement {
       case "effort": body = `<h2>How hard was that set?</h2><div class="muted small">${esc(sh.subtitle)}</div>
         <div class="menu">${EFFORT.map(([v, l, d]) => `<button class="menuitem effort" data-action="effort" data-v="${v}"><span class="rpebig e${v}">${v}</span><span class="mlabel">${l}<span class="muted small">${d}</span></span></button>`).join("")}</div>
         <button class="btn ghost full" data-action="effort" data-v="">Skip</button>`; break;
-      case "confirm": body = `<h2>${esc(sh.title)}</h2><p>${esc(sh.text)}</p><div class="actions"><button class="btn" data-action="confirmNo">Cancel</button><button class="btn ${sh.danger ? "danger" : "primary"}" data-action="confirmYes">${esc(sh.ok)}</button></div>`; break;
+      case "confirm": body = `<h2 class="${sh.warn ? "warntitle" : ""}">${sh.warn ? icon("mdi:alert") + " " : ""}${esc(sh.title)}</h2><p>${esc(sh.text)}</p><div class="actions"><button class="btn ${sh.warn ? "primary" : ""}" data-action="confirmNo">${esc(sh.cancel || "Cancel")}</button><button class="btn ${sh.danger ? "danger" : sh.warn ? "" : "primary"}" data-action="confirmYes">${esc(sh.ok)}</button></div>`; break;
     }
     const prevScroll = animate ? 0 : el.querySelector(".sheetbody")?.scrollTop || 0;
     el.innerHTML = `<div class="scrim" data-action="closeSheet"></div>
@@ -1057,8 +1064,15 @@ class HealthAssistantPanel extends HTMLElement {
     } else { d.sheet.style.transition = "transform .18s"; d.sheet.style.transform = ""; }
   }
 
-  _confirm(title, text, ok = "OK", danger = false) {
-    return new Promise((resolve) => this._openSheet({ kind: "confirm", title, text, ok, danger, resolve, onClose: () => resolve(false) }));
+  _confirm(title, text, ok = "OK", danger = false, cancel = "Cancel", warn = false) {
+    return new Promise((resolve) => this._openSheet({ kind: "confirm", title, text, ok, danger, cancel, warn, resolve, onClose: () => resolve(false) }));
+  }
+
+  /** Warn (but allow) when a plan means eating more than 600 kcal/day below maintenance. */
+  async _deficitOk(deficit) {
+    if (!(deficit > MAX_SAFE_DEFICIT)) return true;
+    return this._confirm("Warning!", `This works out to a deficit of about ${r0(deficit)} kcal/day. ${DEFICIT_WARNING}`,
+      "Keep it anyway", false, "Change it", true);
   }
 
   _toast(msg, err = false) {
@@ -1463,6 +1477,7 @@ class HealthAssistantPanel extends HTMLElement {
           const keys = ["calorie_target_override", "protein_override_g", "carbs_override_g", "fat_override_g"];
           const changes = {};
           keys.forEach((k) => (changes[k] = action === "resetTargets" ? null : num(this.shadowRoot.querySelector(`[data-t="${k}"]`).value)));
+          if (changes.calorie_target_override && !(await this._deficitOk(s.overview.energy.maintenance - changes.calorie_target_override))) break;
           await this.ws("profile/update", { changes });
           s.sheets = []; await this._loadAll(); this._render(); this._toast(action === "resetTargets" ? "Using calculated targets" : "Targets saved"); break;
         }
@@ -1500,6 +1515,11 @@ class HealthAssistantPanel extends HTMLElement {
           const curH = s.overview.latest.height?.value ?? s.overview.profile.height_cm;
           const h = nu.imp ? ((num(get("ft")) || 0) * 12 + (num(get("in")) || 0)) * 2.54 : num(get("cm"));
           if (h && Math.abs(h - curH) > 0.6) changes.height_cm = Math.round(h * 10) / 10;
+          const losing = (s.overview.latest.weight?.value ?? 0) - changes.target_weight_kg >= 0.5;
+          if (losing && !s.overview.profile.calorie_target_override
+              && !(await this._deficitOk((changes.goal_rate_kg_week || 0) * 7700 / 7))) break;
+          if (s.overview.energy?.lifting?.active) delete changes.lifting_days;
+          if (s.overview.energy?.steps_source === "tracked") delete changes.daily_steps;
           await this.ws("profile/update", { changes });
           s.sheets = []; await this._loadAll(); this._render(); this._toast("Profile saved"); break;
         }
@@ -1716,6 +1736,7 @@ main { flex:1 1 auto; min-height:0; overflow-y:auto; -webkit-overflow-scrolling:
 .setbadge.warm { background:color-mix(in srgb, var(--warm) 22%, transparent); color:#a77a00; }
 .setbadge.drop { background:color-mix(in srgb, var(--drop) 20%, transparent); color:var(--drop); }
 .setbadge.fail { background:color-mix(in srgb, var(--fail) 18%, transparent); color:var(--fail); }
+.warntitle { color:#d97706; } .warntitle ha-icon { --mdc-icon-size:22px; }
 .actions { display:flex; gap:8px; justify-content:flex-end; margin-top:16px; flex-wrap:wrap; }
 .histrow { padding:8px 0; border-top:1px solid var(--hp-line); }
 .hero { text-align:center; padding:24px 16px; }

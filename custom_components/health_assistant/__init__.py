@@ -81,6 +81,11 @@ async def _async_register_panel(hass: HomeAssistant) -> None:
             domain["chime_url"] = "/health_assistant_sounds/chime.mp3"
         await hass.http.async_register_static_paths(paths)
         domain["static_registered"] = True
+    if not domain.get("cards_registered"):
+        # Dashboard cards (calendar, calorie gauge, log-meal button) load on every dashboard.
+        cards_mtime = int(os.path.getmtime(os.path.join(FRONTEND_DIR, "health-cards.js")))
+        frontend.add_extra_js_url(hass, f"{STATIC_URL}/health-cards.js?v={cards_mtime}")
+        domain["cards_registered"] = True
     if domain.get("panel_registered"):
         return
     # mtime cache-buster so a reload always serves the newest panel build

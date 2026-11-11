@@ -40,7 +40,7 @@
       },
       "summary": {
         "title": "Your numbers",
-        "description": "**Formula:** {formula}\n\n**BMR:** {bmr} kcal\n\n**Maintenance:** {maintenance} kcal ({activity}, ×{multiplier})\n\n**Goal:** {goal}\n\n**Daily target:** {target} kcal{floor_note}\n\n**Macros:** {protein} g protein · {fat} g fat · {carbs} g carbs\n\nYou can change any of this later from the Profile tab in the Health panel."
+        "description": "**Formula:** {formula}\n\n**BMR:** {bmr} kcal\n\n**Maintenance:** {maintenance} kcal ({activity}, ×{multiplier})\n\n**Goal:** {goal}\n\n**Daily target:** {target} kcal{floor_note}{deficit_warning}\n\n**Macros:** {protein} g protein · {fat} g fat · {carbs} g carbs\n\nYou can change any of this later from the Profile tab in the Health panel."
       }
     },
     "error": {

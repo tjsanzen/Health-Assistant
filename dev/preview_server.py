@@ -147,6 +147,7 @@ C = {
     "workout/get": lambda m, workout_id: m.workout(workout_id),
     "workout/delete": lambda m, workout_id: m.delete_workout(workout_id),
     "records": lambda m: m.records(),
+    "workout/calendar": lambda m, year, month: m.workout_calendar(year, month),
     "templates/list": lambda m: sorted(m.data["templates"], key=lambda t: t["name"].lower()),
     "templates/save": lambda m, template: m.save_template(template),
     "templates/from_workout": lambda m, workout_id, name=None: m.template_from_workout(workout_id, name),
@@ -164,6 +165,8 @@ class Handler(SimpleHTTPRequestHandler):
     def do_GET(self):
         if self.path in ("/", "/index.html"):
             self.path = "/dev/preview.html"
+        elif self.path.startswith("/cards"):
+            self.path = "/dev/cards.html"
         return super().do_GET()
 
     def do_POST(self):
