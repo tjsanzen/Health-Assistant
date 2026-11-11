@@ -12,14 +12,20 @@ Workout, Nutrition, and Health Datapoint logging inside of Home Assistant. Track
 > ⚠️ **This integration is _<ins>NOT</ins>_ able to run offline.**
 > Health Assistant requires a connection to your Home Assistant server to run. While most gyms have free wifi for members, please keep this in mind when using. This integration has been developed for web and the iOS companion app.
 
+## Screenshots:
+
+<img src="images/nutrition_desktop.png" alt="Nutrition Page" style="vertical-align: middle;">
+
+<img src="images/live_activity_mobile.jpeg" alt="Nutrition Page"  style="vertical-align: left;"> <img src="images/workout_mobile.jpeg" alt="Nutrition Page"  style="vertical-align: right;">
+
+
 ## Installation
 
-<a href="https://my.home-assistant.io/redirect/hacs_repository/?owner=tjsanzen&repository=health-assistant&category=Integration"><img src="https://my.home-assistant.io/badges/hacs_repository.svg" width="210" height="auto"></a>
+[![Open your Home Assistant instance and open this repository in HACS.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=tjsanzen&repository=health-assistant&category=integration)
 
+## What's in Health Assistant v0.2.1
 
-## What's in v0.1
-
-**Health panel** (sidebar, apple icon). On phones there's no top bar: a sticky bottom tab bar holds the Home Assistant menu, History, **Start Workout** (centre), Nutrition and Profile, and everything you tap opens as a bottom sheet you can swipe down to dismiss. On desktop the tabs move into a header bar and sheets open as centred dialogs.
+**Health Assistant** has four primary views, each serving a different function in your health journey. 
 
 | Tab | What it does |
 | --- | --- |
@@ -28,58 +34,15 @@ Workout, Nutrition, and Health Datapoint logging inside of Home Assistant. Track
 | **Nutrition** | Daily calorie ring and macro bars, meals (breakfast / lunch / dinner / snack), food search across ~327k OpenNutrition foods, recent foods, quick add, custom foods, edit and delete, previous days. Stats: average calories/protein/carbs/fat over 7 days, 30 days and all time, a 14-day chart against your target, logging streak and days on target. On desktop the stats sit in a right-hand column. |
 | **Profile** | Weight progress toward your target with a trend chart, health-stat tiles (weight, body fat, BP, heart rate, HRV, SpO₂, respiration, height) with history, daily targets (calculated, or **set your own** calories and protein/carbs/fat), workout & rest-timer settings, and profile editing. |
 
+## Setup and Sensors
+
 **Setup flow** asks for name, linked HA user, units, current and target weight, height, body fat % (optional), age, sex, average daily steps, weekly 1-hour lifting days and goal pace. It then shows your numbers before you confirm.
 
 **Sensors** (per profile): calories today/remaining, calorie target, maintenance, BMR, protein/carbs/fat today, weight, body fat, heart rate, blood pressure, last workout, workouts this week.
 
-## Data folder
+> **CREATOR RECOMMENDATION**
+> By default, there are two different calculations for BMR built in, one with body fat percentage and one without. If you have access to a DEXA scan or similar method to find your exact body fat percentage, I highly recommend it. If you live in the Dallas Fort-Worth area, I recommend BodySpec, it is really affordable. Please use my referral link if you're willing to! [BodySpec Sign-Up](https://www.bodyspec.com/r/wZJdna)
 
-Everything the integration reads lives in `custom_components/health_assistant/data/`. It has to be inside the integration because HACS only installs that folder.
-
-```
-data/
-├── opennutrition_foods.tsv     # source export, git-ignored (too big for GitHub)
-├── foods.db                    # built from the TSV by scripts/build_food_db.py
-├── chime.mp3                   # plays when a rest timer finishes
-├── exercises/
-│   └── exercises.json          # the exercise library
-└── demos/
-    └── lateral_raise_cable.gif # one GIF per exercise, named <id>.gif
-```
-
-`exercises.json` is keyed by exercise id:
-
-```json
-"lateral_raise_cable": {
-  "name": "Lateral Raise (Cable)",
-  "muscle": "Shoulders",
-  "secondary": ["Traps"],
-  "equipment": "Cable",
-  "kind": "weight_reps",
-  "instructions": ["Set a single cable pulley to its lowest position…", "…"],
-  "tips": ["Lead with the elbow, not the hand."],
-  "demo": "lateral_raise_cable.gif"
-}
-```
-
-- `kind` is `weight_reps`, `bodyweight_reps`, `duration` or `distance` (it decides which columns the workout table shows).
-- `instructions` can be a list of steps or one string; `secondary`, `tips` and `demo` are optional (`demo` defaults to `<id>.gif`).
-- The GIF and instructions show when you tap an exercise's name. A missing GIF is simply hidden.
-- Changes to the JSON or the demos folder are picked up without restarting Home Assistant. A JSON syntax error is logged and the previous library is kept.
-- Don't rename an id after you've logged workouts with it; history refers to the id.
-
-## Rest timer on iPhone (Dynamic Island)
-
-Pick your phone during setup (it's pre-selected when the profile is linked to your Home Assistant user), or later under Profile → Settings → **Workout & rest timer**, which also has a **Send a test** button. Health Assistant then uses the Companion app's Live Activities. One activity runs for the whole workout:
-
-- **While you rest:** a countdown, with "Next: Bench Press · Set 3 · 185 lb × 8" underneath.
-- **When the rest ends:** an alert reading "Rest over · Next: …".
-- **Between sets:** "Workout in progress".
-- **When you finish or discard:** the activity ends.
-
-The countdown ticks on the phone itself, so it keeps going with the panel closed. The Companion app only allows Material Design icons, so the activity uses `mdi:food-apple` in the logo's blue. The title is fixed when the activity starts, so it's always the workout name.
-
-Requires Companion app 2026.9+, iOS 17.2+ and Home Assistant 2026.7+. Live Activities must also be allowed for Home Assistant in iPhone Settings, and the phone needs to reach HA (remote access when you're at the gym). Apple ends Live Activities after 8 hours and limits how many can be started in a row.
 
 ## Dashboard cards
 
@@ -110,25 +73,9 @@ When you pick your phone during setup, Health Assistant connects that phone's Co
 
 The sensor counts steps your iPhone detects, not your Apple Watch. If it's missing, turn it on in the Companion app under Settings → Companion app → Sensors.
 
-## Saving workouts to Apple Health
+## How numbers are calculated
 
-Home Assistant can't write to Apple Health itself; only an app on the phone can. So when you finish a workout, Health Assistant sends a **"Save to Apple Health?"** notification to your phone. Tapping it runs an Apple Shortcut that logs the workout. Before iOS 27, iOS requires that tap before a notification may run a Shortcut. Afterwards the workout shows a ♥ Health badge in History.
-
-What gets saved: a Traditional Strength Training workout with the right start time, duration and estimated calories. Calories use 5 METs × your weight × duration. Sets, reps and weights stay in Health Assistant, because the Health app's Log Workout action has nowhere to put them.
-
-**Build the Shortcut once** (Shortcuts app → +), named exactly **Health Assistant Log Workout**, or change the name in Profile → iPhone, rest timer & Apple Health:
-
-1. **Get Dictionary from** *Shortcut Input*.
-2. **Get Value for** `start` **in** *Dictionary*, then **Get Dates from** *Dictionary Value*.
-3. **Get Value for** `duration_min` **in** *Dictionary*.
-4. **Get Value for** `kcal` **in** *Dictionary*.
-5. **Log Workout**: type *Traditional Strength Training*, Date = the date from step 2, Duration = the value from step 3 in *minutes*, Calories = the value from step 4 in *kcal*.
-
-The input also includes `title`, `end` and `workout_id` if you want them. The first run asks for Health permission. You can turn the notification off in Profile.
-
-## How the numbers are calculated
-
-- **BMR**: Katch-McArdle (`370 + 21.6 × lean mass kg`) when body fat is known, otherwise Mifflin-St Jeor.
+- **BMR**: Katch-McArdle (`370 + 21.6 × lean mass kg`) when body fat is known, otherwise Mifflin-St Jeor. Again, I really recommend getting a [DEXA scan](https://www.bodyspec.com/r/wZJdna) as the Katch-McArdle is so much more accurate.
 - **Maintenance (TDEE)**: `BMR × 1.2` (sedentary baseline, includes digestion and ~3,000 steps)
   - steps above 3,000 × 0.0005 kcal × body weight (kg) (≈0.04 kcal/step at 80 kg)
   - lifting days × 4 net METs × body weight (kg) ÷ 7
@@ -143,25 +90,6 @@ The input also includes `title`, `end` and `workout_id` if you want them. The fi
 - Current weight, body fat and height always come from your **latest logged health stat**, so the targets update as you log.
 - Records ignore warm-up sets. Estimated 1RM uses Epley: `w × (1 + reps/30)`.
 
-## Install
-
-1. Copy `custom_components/health_assistant` into your HA `config/custom_components/` (or add this repo to HACS as a custom repository).
-2. **Food database**: put `opennutrition_foods.tsv` in `data/` and run `python3 scripts/build_food_db.py` (about 20 s, produces the ~74 MB `data/foods.db`). HA also looks at `config/health_assistant/foods.db`. If you copy the integration to HA by hand, leave the 282 MB TSV behind; HA only needs `foods.db`.
-3. Restart HA → Settings → Devices & services → Add integration → **Health Assistant**. Add one profile per person and link each to their HA user, and the panel opens the right profile automatically. A profile switcher appears when there's more than one.
-
-## Developing
-
-```bash
-# Panel preview in a normal browser, no HA needed (uses the real model + food db)
-python3 dev/preview_server.py --reset     # http://localhost:8765  (#dark for dark theme)
-
-# Tests
-python3 tests/test_model.py                          # pure model/calcs
-pip install pytest-homeassistant-custom-component home-assistant-frontend
-pytest tests                                         # + full HA integration test
-```
-
-The panel is a single dependency-free web component (`frontend/health-panel.js`); no build step. It's cache-busted by file mtime, so a HA restart picks up changes.
 
 ### Data model
 
@@ -180,4 +108,4 @@ Food data comes from [OpenNutrition](https://www.opennutrition.app). Check their
 
 Chime noise: Music by <a href="https://pixabay.com/users/freepalestine_loverespect-55896143/?utm_source=link-attribution&utm_medium=referral&utm_campaign=music&utm_content=585518">love respect</a> from <a href="https://pixabay.com/music//?utm_source=link-attribution&utm_medium=referral&utm_campaign=music&utm_content=585518">Pixabay</a>
 
-Icon design by myself in Canva.
+Icon and asset design by myself in Canva.
