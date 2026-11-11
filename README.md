@@ -23,6 +23,12 @@ Workout, Nutrition, and Health Datapoint logging inside of Home Assistant. Track
 
 [![Open your Home Assistant instance and open this repository in HACS.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=tjsanzen&repository=health-assistant&category=integration)
 
+> **CREATOR RECOMMENDATION:**
+> 
+> By default, there are two different calculations for BMR built in, one with body fat percentage and one without. If you have access to a DEXA scan or similar method to find your exact body fat percentage, I highly recommend it. If you live in one of the cities below, I recommend BodySpec, it is really affordable. Please use my referral link if you're willing to! [BodySpec Sign-Up](https://www.bodyspec.com/r/wZJdna)
+> <img src="images/cities.png" alt="BodySpec Cities" height="240" style="vertical-align: middle;"> 
+
+
 ## What's in Health Assistant v0.2.1
 
 **Health Assistant** has four primary views, each serving a different function in your health journey. 
@@ -39,11 +45,6 @@ Workout, Nutrition, and Health Datapoint logging inside of Home Assistant. Track
 **Setup flow** asks for name, linked HA user, units, current and target weight, height, body fat % (optional), age, sex, average daily steps, weekly 1-hour lifting days and goal pace. It then shows your numbers before you confirm.
 
 **Sensors** (per profile): calories today/remaining, calorie target, maintenance, BMR, protein/carbs/fat today, weight, body fat, heart rate, blood pressure, last workout, workouts this week.
-
-> **CREATOR RECOMMENDATION**
-> By default, there are two different calculations for BMR built in, one with body fat percentage and one without. If you have access to a DEXA scan or similar method to find your exact body fat percentage, I highly recommend it. If you live in one of the cities below, I recommend BodySpec, it is really affordable. Please use my referral link if you're willing to! [BodySpec Sign-Up](https://www.bodyspec.com/r/wZJdna)
-> <img src="images/cities.png" alt="BodySpec Cities" height="240" style="vertical-align: middle;"> 
-
 
 ## Dashboard cards
 
