@@ -65,6 +65,32 @@ icon: mdi:silverware-fork-knife               # optional
 - **Gauge colours:** blue up to 90% of your target, green within ±10%, red when you're over.
 - **Log a meal dialog:** OpenNutrition search, recent foods and Quick add, logged to the meal you pick.
 
+## Importing your workout history (Strong)
+
+Profile → Settings → **Import workout history** → pick a CSV exported from the Strong app (Settings → Export Data).
+
+- **Preview first:** you see how many workouts and sets are new, the date range, and how every Strong exercise name was matched. Nothing is saved until you press **Import**.
+- **Matching:** Strong's names are matched with a built-in table, for example "Bench Press (Barbell)" → Bench Press and "Seated Row (Cable)" → Seated Cable Row. Anything not in the table falls back to the closest library name. Anything still left becomes a custom exercise with its Strong name.
+- **What's kept:**
+  - warm-up, failure and drop sets (W / F / D);
+  - effort (RPE) and set notes;
+  - the rest timer, used as each exercise's rest;
+  - cardio distance and time.
+
+  Weights and distances are converted from your profile's units.
+- **Calories and PRs:** each imported workout gets calories from the engine, fitted to the workout's real length, and PRs judged against everything before it.
+- **Safe to re-run:** importing the same file again skips workouts already imported. **Remove all imported Strong workouts** undoes it without touching workouts you logged in Health Assistant.
+
+## Rest-over sound in your headphones
+
+When a rest timer ends, Health Assistant sends your phone a notification with a sound, so you hear it through your headphones even when the app is closed. Pick the sound in **Profile → iPhone, rest timer & Apple Health → Sound when rest is over**:
+
+- **Chime**: the same chime the panel plays. Import it into the Companion app once: tap *download the chime file* in that sheet, save `health_assistant_chime.wav` to Files or iCloud Drive, then in the Home Assistant app go to **Settings → Companion app → Notifications → Sounds → Import custom sound**, pick the file, and restart the iPhone. Until it's imported, iOS plays its default sound.
+- **iPhone default sound**: the standard notification tone.
+- **No sound**: the Live Activity update only vibrates the phone.
+
+The notification is time-sensitive, so it gets through Focus modes. Each one is cleared when your next rest starts. The ring/silent switch still applies.
+
 ## Steps from your iPhone
 
 When you pick your phone during setup, Health Assistant connects that phone's Companion app step sensor (`sensor.<phone>_steps`). You can change it under Profile → iPhone, rest timer & Apple Health.

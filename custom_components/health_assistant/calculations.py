@@ -309,6 +309,19 @@ def workout_calories(workout: dict, exercises: dict[str, dict], weight_kg: float
         if gap > 0:
             segs.append((min(gap, MAX_IDLE_PER_GAP_S), IDLE_MET, "idle", ex_id))
 
+    # No tick times but a known total duration (e.g. imported history): fit the assumed
+    # rest to the real length of the workout instead of trusting the planned rest timers.
+    start_t, end_t = _ts(workout.get("started_at")), _ts(workout.get("ended_at"))
+    if not timed and start_t and end_t:
+        total_s = max(0.0, _secs(start_t, end_t))
+        work = sum(sec for sec, _, ph, _ in segs if ph == "set")
+        gaps = sum(sec for sec, _, ph, _ in segs if ph in ("rest", "transition"))
+        if gaps and work + gaps > total_s:
+            f = max(0.0, total_s - work) / gaps
+            segs = [(sec * f if ph in ("rest", "transition") else sec, met, ph, ex) for sec, met, ph, ex in segs]
+        elif total_s > work + gaps:
+            segs.append((min(total_s - work - gaps, MAX_IDLE_PER_GAP_S), IDLE_MET, "idle", ""))
+
     # Before the first set and after the last one (only knowable with tick times).
     start, end = _ts(workout.get("started_at")), _ts(workout.get("ended_at"))
     if timed and start:

@@ -7,6 +7,9 @@ const LB = 2.2046226218;
 const OZ_G = 28.349523125;
 const MI_M = 1609.344;
 const MEALS = ["breakfast", "lunch", "dinner", "snack"];
+/** Meal to suggest from the time of day. */
+const mealForNow = (h = new Date().getHours() + new Date().getMinutes() / 60) =>
+  h >= 4 && h < 10.5 ? "breakfast" : h >= 10.5 && h < 14.5 ? "lunch" : h >= 16.5 && h < 21 ? "dinner" : "snack";
 const TABS = [
   { id: "history", label: "History", icon: "mdi:history", title: "History" },
   { id: "workout", label: "Start Workout", icon: "mdi:plus", title: "Workout" },
@@ -27,6 +30,7 @@ const EFFORT = [
   [6, "Easy", "No real effort — 4+ reps left"],
 ];
 const MAX_SAFE_DEFICIT = 600;
+const HARD_SET_REST_S = 180; // rest after an effort-10 or failure set
 const DEFICIT_WARNING = "Modern research suggests that a caloric deficit of more than 500-600 calories per day can be dangerous, and cause you to lose fat and muscle, even with high protein intake. We suggest a smaller deficit.";
 const REST_OPTIONS = [0, 30, 45, 60, 90, 120, 150, 180, 240, 300];
 const VITALS = {
@@ -305,20 +309,20 @@ class HealthAssistantPanel extends HTMLElement {
   _renderNav() {
     const root = this.shadowRoot;
     const s = this._s;
-    const btn = (t) => {
+    const btn = (t, bottom = false) => {
       const on = s.tab === t.id;
       const isW = t.id === "workout";
       // While a workout is running, the centre button shows the rest countdown when resting
       // (and nothing ticking otherwise) — the workout clock lives in the workout header.
       const rest = s.active?.rest;
       const label = isW && s.active ? (rest ? `Rest <span data-restnav>${fmtDur(Math.max(0, rest.ends_at - now()))}</span>` : "Workout") : t.label;
-      return `<button class="navbtn ${on ? "on" : ""} ${isW ? "center" : ""}" data-action="tab" data-tab="${t.id}">
+      return `<button class="navbtn ${on ? "on" : ""} ${isW ? "center" : ""}" data-action="tab" data-tab="${t.id}" ${isW && bottom ? 'data-center="1"' : ""}>
         <span class="navicon">${icon(isW && s.active ? "mdi:dumbbell" : t.icon)}</span><span class="navlabel">${label}</span></button>`;
     };
     const [hist, work, nut, prof] = TABS;
     root.getElementById("bottomnav").innerHTML =
       `<button class="navbtn" data-action="menu" aria-label="Home Assistant menu"><span class="navicon">${icon("mdi:menu")}</span><span class="navlabel">Menu</span></button>` +
-      btn(hist) + btn(work) + btn(nut) + btn(prof);
+      btn(hist) + btn(work, true) + btn(nut) + btn(prof);
     // Desktop header: right-aligned, with Start Workout furthest right.
     root.getElementById("topnav").innerHTML = btn(hist) + btn(nut) + btn(prof) + btn(work);
     root.getElementById("profilepick").innerHTML = this._profileSelect();
@@ -587,7 +591,10 @@ class HealthAssistantPanel extends HTMLElement {
     }
   }
   _restDone(next) {
-    this._playChime();
+    // In the iPhone app with a rest sound on, the rest-over notification already plays it.
+    const prof = this._s.overview?.profile || {};
+    const phoneSounds = /Home Assistant\//.test(navigator.userAgent) && prof.live_activity_notify && (prof.rest_sound || "chime") !== "off";
+    if (!phoneSounds) this._playChime();
     try { navigator.vibrate?.([200, 100, 200]); } catch (_) { /* iOS has no vibrate */ }
     this._toast(next ? `Rest over — ${next}` : "Rest over — next set!");
   }
@@ -856,6 +863,7 @@ class HealthAssistantPanel extends HTMLElement {
       <div class="card list">
         <button class="listrow" data-action="workoutSettings">${icon("mdi:timer-cog-outline")}<span>iPhone, rest timer & Apple Health</span><span class="muted">${fmtRest(p.rest_default_s ?? 120)}${p.live_activity_notify ? " · iPhone" : ""}</span>${icon("mdi:chevron-right", "muted")}</button>
         <button class="listrow" data-action="editProfile">${icon("mdi:account-edit-outline")}<span>Body & goal</span><span></span>${icon("mdi:chevron-right", "muted")}</button>
+        <button class="listrow" data-action="importOpen">${icon("mdi:database-import-outline")}<span>Import workout history</span><span class="muted">Strong</span>${icon("mdi:chevron-right", "muted")}</button>
       </div>`;
   }
 
@@ -912,6 +920,10 @@ class HealthAssistantPanel extends HTMLElement {
         ${targets && !targets.length ? `<p class="muted small">No Companion app devices found. Install the Home Assistant app on your phone and sign in first.</p>` : ""}
         <button class="btn soft full" data-action="testLive">${icon("mdi:cellphone-arrow-down")} Send a test (60-second countdown)</button>
         <p class="muted small">Uses Live Activities from the Home Assistant Companion app (iOS 17.2+, Home Assistant 2026.7+). While you rest, your Lock Screen and Dynamic Island count down and show your next set. If the test doesn't appear: allow Live Activities for Home Assistant in iPhone Settings → Home Assistant, accept the one-time Lock Screen notice, and make sure the phone can reach Home Assistant. iOS also limits how many activities can be started in a row, so repeated tests may stop appearing for a while.</p>
+        <label>Sound when rest is over
+          <select data-ws="rest_sound">${[["chime", "Chime (import once, see below)"], ["default", "iPhone default sound"], ["off", "No sound — vibrate only"]].map(([v, l]) => `<option value="${v}" ${v === (p.rest_sound || "chime") ? "selected" : ""}>${l}</option>`).join("")}</select></label>
+        <button class="btn soft full" data-action="testSound">${icon("mdi:headphones")} Play the rest-over sound on my phone</button>
+        <p class="muted small">Sent as a notification at the end of each rest, so it plays even when this app is closed and comes through your headphones when they're connected. Your phone's ring/silent switch still applies. To use the chime, ${this._s.overview.chime_wav_url ? `<a href="${esc(this._s.overview.chime_wav_url)}" download="health_assistant_chime.wav" target="_blank">download the chime file</a>` : "download the chime file"} and save it to Files or iCloud Drive, then in the Home Assistant app go to Settings → Companion app → Notifications → Sounds → Import custom sound, pick it, and restart your iPhone. Until then, iOS plays its default sound.</p>
         <h3>Steps</h3>
         <label>Step counter
           <select data-ws="steps_sensor"><option value="">Off — use the number from setup</option>${(sh.sensors || []).map((x) => `<option value="${esc(x.entity_id)}" ${x.entity_id === p.steps_sensor ? "selected" : ""}>${esc(x.name)}</option>`).join("")}</select></label>
@@ -922,6 +934,31 @@ class HealthAssistantPanel extends HTMLElement {
         <p class="muted small">You'll get a notification on the phone above when you finish a workout; tapping it runs this Shortcut, which logs a strength workout (time, duration, calories) in Apple Health. See the README for how to build the Shortcut.</p>
         <button class="btn primary full" data-action="saveWorkoutSettings">Save</button>
       </div>`;
+  }
+
+  _sheetImport(sh) {
+    const r = sh.result;
+    const intro = `<h2>${icon("mdi:database-import-outline")} Import workout history</h2>
+      <p class="muted small">A one-time import from the <b>Strong</b> app. In Strong, use <b>Export Data</b> in Settings, save the CSV, then pick it here. You'll see how every exercise was matched before anything is saved, and importing the same file again only adds workouts that aren't already here.</p>`;
+    if (sh.busy) return intro + `<p class="center muted">${esc(sh.busy)}</p>`;
+    if (!r) return intro + `<label class="filepick">${icon("mdi:file-delimited-outline")} Choose CSV file<input type="file" accept=".csv,text/csv" data-change="importFile" hidden></label>
+      ${sh.error ? `<div class="card warn small">${esc(sh.error)}</div>` : ""}`;
+    const how = { table: "", name: "", fuzzy: " (closest name)", none: " (new custom exercise)" };
+    const rows = r.matches.map((m) => `<div class="maprow"><span>${esc(m.strong)}</span>${icon("mdi:arrow-right", "muted")}<span class="${m.exercise_id ? "" : "accent"}">${esc(m.name || m.strong)}${how[m.how] || ""}</span><span class="muted xsmall">${m.sets}</span></div>`).join("");
+    const done = !r.dry_run;
+    return intro + `<div class="card ${done ? "" : "importsum"}">
+        ${done ? `<b>${icon("mdi:check-circle", "accent")} Imported ${r.new_workouts} workouts (${r.sets.toLocaleString()} sets)</b>`
+          : `<b>${r.new_workouts} new workout${r.new_workouts === 1 ? "" : "s"} · ${r.sets.toLocaleString()} sets</b>`}
+        ${r.first ? `<div class="muted small">${fmtDate(r.first, { month: "short", day: "numeric", year: "numeric" })} – ${fmtDate(r.last, { month: "short", day: "numeric", year: "numeric" })}</div>` : ""}
+        ${r.already_imported ? `<div class="muted small">${r.already_imported} already imported — skipped</div>` : ""}
+        ${r.skipped_empty_sets ? `<div class="muted small">${r.skipped_empty_sets} empty sets ignored</div>` : ""}
+      </div>
+      ${done ? `<p class="muted small">History, records and PRs now include your Strong workouts, and calories were estimated from each workout's length. Your lifting calories update maintenance automatically.</p>
+          <button class="btn primary full" data-action="closeSheet">Done</button>`
+        : `${r.new_workouts ? `<button class="btn primary full big" data-action="importRun">Import ${r.new_workouts} workouts</button>` : `<p class="muted center">Nothing new to import.</p>`}
+          <h3>How exercises were matched</h3><div class="muted xsmall">Strong name → Health Assistant · sets</div>
+          <div class="maplist">${rows}</div>`}
+      ${sh.imported ? `<button class="btn danger ghost full" data-action="importUndo">Remove all ${sh.imported} imported Strong workouts</button>` : ""}`;
   }
 
   _sheetProfile() {
@@ -996,6 +1033,30 @@ class HealthAssistantPanel extends HTMLElement {
   }
 
   /* An iOS-style action sheet. items: [{label, icon, run, danger, sub, swatch, on}] */
+  async _openAddFood(meal) {
+    const sh = { kind: "addFood", meal, mode: "search", query: "" };
+    this._openSheet(sh);
+    Object.assign(sh, await this.ws("food/recent"));
+    if (this._sheet === sh && !sh.query) this._updateFoodResults();
+  }
+
+  /** The phone's centre button on the Nutrition tab: you're usually there to log food. */
+  _centerMenu() {
+    const meal = mealForNow();
+    const go = async () => {
+      const s = this._s;
+      s.tab = "workout"; localStorage.setItem("ha-health-tab", s.tab); s.sheets = [];
+      this._render(); this.shadowRoot.getElementById("content").scrollTop = 0;
+      await this._loadTab(); this._render();
+    };
+    this._actionSheet("What would you like to do?", [
+      { label: "Log food", sub: `Adds to ${cap(meal)}`, icon: "mdi:food-apple-outline", run: () => this._openAddFood(meal) },
+      this._s.active
+        ? { label: "Back to workout", sub: this._s.active.name || "In progress", icon: "mdi:dumbbell", run: go }
+        : { label: "Start workout", icon: "mdi:dumbbell", run: go },
+    ]);
+  }
+
   _actionSheet(title, items, subtitle = "") {
     this._openSheet({ kind: "menu", title, subtitle, items });
   }
@@ -1031,6 +1092,7 @@ class HealthAssistantPanel extends HTMLElement {
       case "profile": body = this._sheetProfile(); break;
       case "targets": body = this._sheetTargets(); break;
       case "workoutSettings": body = this._sheetWorkoutSettings(sh); break;
+      case "import": body = this._sheetImport(sh); break;
       case "template": body = this._sheetTemplate(sh); break;
       case "picker": body = this._sheetPicker(sh); break;
       case "effort": body = `<h2>How hard was that set?</h2><div class="muted small">${esc(sh.subtitle)}</div>
@@ -1198,10 +1260,16 @@ class HealthAssistantPanel extends HTMLElement {
     // Supersets: only rest after the last exercise in the group.
     const group = ex.superset ? s.active.exercises.filter((o) => o.superset === ex.superset) : [ex];
     const isLast = group[group.length - 1] === ex;
-    const restS = ex.rest_s ?? 120;
+    // An all-out set (effort 10 or a failure set) gets at least 3 minutes, never less than the
+    // exercise's own rest. In a superset, any all-out set in this round counts.
+    const allOut = (o) => o && o.completed && (o.rpe === 10 || o.type === "failure");
+    const hard = group.some((o) => allOut(o === ex ? x : o.sets[si]));
+    const baseS = ex.rest_s ?? 120;
+    const restS = hard && baseS > 0 ? Math.max(baseS, HARD_SET_REST_S) : baseS;
     if (x.type !== "warmup" && isLast && restS > 0) {
       const nx = this._nextSet(ei);
       this._setRest({ ends_at: now() + restS, total: restS, exercise_id: nx?.exercise_id ?? ex.exercise_id, next: nx?.label ?? null });
+      if (restS > baseS) this._toast(`All-out set — resting ${fmtRest(restS)}`);
     } else if (!isLast) {
       this._toast(`Next: ${this._exName(group[group.indexOf(ex) + 1].exercise_id)}`);
     }
@@ -1245,6 +1313,7 @@ class HealthAssistantPanel extends HTMLElement {
       switch (action) {
         case "menu": this.dispatchEvent(new Event("hass-toggle-menu", { bubbles: true, composed: true })); break;
         case "tab":
+          if (d.center && s.tab === "nutrition") { this._centerMenu(); break; }
           s.tab = d.tab; localStorage.setItem("ha-health-tab", s.tab); s.sheets = [];
           this._render(); this.shadowRoot.getElementById("content").scrollTop = 0;
           await this._loadTab(); this._render();
@@ -1379,13 +1448,7 @@ class HealthAssistantPanel extends HTMLElement {
         /* nutrition */
         case "day": s.day = addDays(s.day, +d.d); s.food = await this.ws("food/day", { date: s.day }); this._render(); break;
         case "dayToday": s.day = localDate(); s.food = await this.ws("food/day", { date: s.day }); this._render(); break;
-        case "addFood": {
-          const sh = { kind: "addFood", meal: d.meal, mode: "search", query: "" };
-          this._openSheet(sh);
-          Object.assign(sh, await this.ws("food/recent"));
-          if (this._sheet === sh && !sh.query) this._updateFoodResults();
-          break;
-        }
+        case "addFood": await this._openAddFood(d.meal); break;
         case "foodMode": this._sheet.mode = d.mode; this._renderSheet(); break;
         case "pickFood": {
           const sh = this._sheet;
@@ -1480,6 +1543,29 @@ class HealthAssistantPanel extends HTMLElement {
             ${rows ? `<h3>Recent days</h3>${rows}` : ""}` });
           break;
         }
+        case "importOpen": {
+          const st = await this.ws("import/status", { source: "strong" });
+          this._openSheet({ kind: "import", result: null, imported: st.count });
+          break;
+        }
+        case "importRun": {
+          const sh = this._sheet;
+          sh.busy = `Importing ${sh.result.new_workouts} workouts…`; this._renderSheet();
+          sh.result = await this.ws("import/strong", { csv: sh.csv, dry_run: false });
+          sh.busy = null; sh.imported += sh.result.new_workouts;
+          s.workouts = null; s.records = null; s.last = {};
+          await this._refreshOverview(); this._renderSheet(); this._render();
+          break;
+        }
+        case "importUndo": {
+          const sh = this._sheet;
+          if (!(await this._confirm("Remove imported workouts?", `This deletes the ${sh.imported} workouts that came from Strong. Workouts you logged in Health Assistant aren't touched.`, "Remove", true))) break;
+          const r = await this.ws("import/undo", { source: "strong" });
+          sh.imported = 0; sh.result = null;
+          s.workouts = null; s.records = null; s.last = {};
+          await this._refreshOverview(); this._renderSheet(); this._render();
+          this._toast(`Removed ${r.removed} imported workouts`); break;
+        }
         case "editProfile": this._openSheet({ kind: "profile" }); break;
         case "editTargets": this._openSheet({ kind: "targets" }); this._updateMacroKcal(); break;
         case "saveTargets": case "resetTargets": {
@@ -1503,11 +1589,20 @@ class HealthAssistantPanel extends HTMLElement {
           const r = await this.ws("live/test", { service: svc });
           this._toast(`Test sent to ${r.sent_to} — check your Lock Screen`); break;
         }
+        case "testSound": {
+          const svc = this.shadowRoot.querySelector('[data-ws="live_activity_notify"]').value;
+          const sound = this.shadowRoot.querySelector('[data-ws="rest_sound"]').value;
+          if (!svc) { this._toast("Pick your phone first", true); break; }
+          if (sound === "off") { this._toast("Sound is off — pick Chime or Default first", true); break; }
+          const r = await this.ws("live/test_sound", { service: svc, sound });
+          this._toast(`Sound sent to ${r.sent_to}`); break;
+        }
         case "saveWorkoutSettings": {
           const el = (k) => this.shadowRoot.querySelector(`[data-ws="${k}"]`);
           const get = (k) => el(k).value;
           await this.ws("profile/update", { changes: {
             rest_default_s: Number(get("rest_default_s")), live_activity_notify: get("live_activity_notify") || null,
+            rest_sound: get("rest_sound"),
             steps_sensor: get("steps_sensor") || null, apple_health_export: el("apple_health_export").checked,
             apple_health_shortcut: get("apple_health_shortcut").trim() || null,
           } });
@@ -1617,6 +1712,16 @@ class HealthAssistantPanel extends HTMLElement {
       if (g) sh.amount = t.value === "g" ? Math.round(g) : t.value === "oz" ? Math.round((g / OZ_G) * 10) / 10 : Math.round((g / (f.serving_g || 100)) * 100) / 100;
       sh.unit = t.value; this._renderSheet();
     } else if (d.change === "portionMeal") this._sheet.meal = t.value;
+    else if (d.change === "importFile") {
+      const sh = this._sheet, file = t.files?.[0];
+      if (!file) return;
+      sh.busy = `Reading ${file.name}…`; sh.error = null; this._renderSheet();
+      try {
+        sh.csv = await file.text();
+        sh.result = await this.ws("import/strong", { csv: sh.csv, dry_run: true });
+      } catch (err) { sh.error = err.message || String(err); }
+      sh.busy = null; this._renderSheet();
+    }
     else if (d.change === "profile") {
       s.profileId = t.value; localStorage.setItem("ha-health-profile", t.value);
       s.workouts = null; s.records = null; s.last = {}; s.loading = true; this._render();
@@ -1818,6 +1923,10 @@ main { flex:1 1 auto; min-height:0; overflow-y:auto; -webkit-overflow-scrolling:
 .tline { position:absolute; left:0; right:0; border-top:1.5px dashed var(--hp-muted); opacity:.7; z-index:1; pointer-events:none; }
 .tline span { position:absolute; right:0; top:-15px; font-size:.65rem; color:var(--hp-muted); }
 .minitiles { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+.filepick { display:flex; align-items:center; justify-content:center; gap:8px; padding:18px; border:2px dashed var(--hp-line); border-radius:14px; color:var(--hp-accent); font-weight:600; cursor:pointer; margin:10px 0; }
+.importsum { border-color:var(--hp-accent); }
+.maplist { margin-top:6px; } .maprow { display:grid; grid-template-columns:1fr 18px 1fr 34px; gap:6px; align-items:center; padding:6px 0; border-top:1px solid var(--hp-line); font-size:.85rem; }
+.maprow ha-icon { --mdc-icon-size:14px; } .maprow > span:last-child { text-align:right; }
 .attribution { text-align:center; font-size:.72rem; color:var(--hp-muted); margin:16px 0 4px; }
 .attribution a { color:inherit; text-decoration:underline; }
 .searchbox { display:flex; align-items:center; gap:6px; background:var(--hp-fill); border-radius:10px; padding:0 10px; margin-bottom:8px; }

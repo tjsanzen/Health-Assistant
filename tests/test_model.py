@@ -17,7 +17,7 @@ PKG_DIR = os.path.join(ROOT, "custom_components", "health_assistant")
 pkg = types.ModuleType("ha_pkg")
 pkg.__path__ = [PKG_DIR]
 sys.modules["ha_pkg"] = pkg
-for mod in ("const", "calculations", "library", "model"):
+for mod in ("const", "calculations", "library", "model", "strong_import"):
     spec = importlib.util.spec_from_file_location(f"ha_pkg.{mod}", os.path.join(PKG_DIR, f"{mod}.py"))
     m = importlib.util.module_from_spec(spec)
     sys.modules[f"ha_pkg.{mod}"] = m
@@ -289,6 +289,48 @@ def test_finished_workout_stores_calories():
     done = m.finish_workout()
     sm = done["summary"]
     assert sm["timed"] and 0 < sm["kcal_active"] < sm["kcal_total"] and "squat" in sm["kcal_by_exercise"]
+
+
+STRONG_SAMPLE = """Date,Workout Name,Duration,Exercise Name,Set Order,Weight,Reps,Distance,Seconds,Notes,Workout Notes,RPE
+5/17/24 21:21,Push,46m,Bench Press (Barbell),W,95,10,0,0,,felt good,
+5/17/24 21:21,Push,46m,Bench Press (Barbell),1,135,8,0,0,,,8
+5/17/24 21:21,Push,46m,Bench Press (Barbell),Rest Timer,0,0,0,150,,,
+5/17/24 21:21,Push,46m,Bench Press (Barbell),2,135,8,0,0,,,9
+5/17/24 21:21,Push,46m,Hip Abductor (Machine),1,100,12,0,0,,,
+5/17/24 21:21,Push,46m,Totally Made Up Move,1,20,10,0,0,,,
+5/17/24 21:21,Push,46m,Walking,1,0,0,1,1200,,,
+5/17/24 21:21,Push,46m,Chest Dip (Assisted),1,0,0,0,0,,,
+5/20/24 18:00,Push,1h 2m,Bench Press (Barbell),1,145,8,0,0,,,
+"""
+
+
+def test_strong_import():
+    si = sys.modules["ha_pkg.strong_import"]
+    m, _, _ = make()
+    parsed = si.parse_strong_csv(STRONG_SAMPLE, m.exercises(), units="imperial")
+    assert len(parsed["workouts"]) == 2 and parsed["skipped_empty_sets"] == 1
+    w = parsed["workouts"][0]
+    bench = w["exercises"][0]
+    assert bench["exercise_id"] == "bench_press" and bench["rest_s"] == 150
+    assert [x["type"] for x in bench["sets"]] == ["warmup", "working", "working"]
+    assert abs(bench["sets"][1]["weight"] - 135 / 2.2046226218) < 0.01 and bench["sets"][2]["rpe"] == 9
+    assert w["exercises"][1]["exercise_id"] == "hip_abductor"
+    assert w["exercises"][3]["exercise_id"] == "walking" and round(w["exercises"][3]["sets"][0]["distance_m"]) == 1609
+    made_up = next(x for x in parsed["matches"] if x["strong"] == "Totally Made Up Move")
+    assert made_up["exercise_id"] is None
+    assert w["ended_at"].startswith("2024-05-17T22:07")
+
+    dry = m.import_workouts(parsed, dry_run=True)
+    assert dry["new_workouts"] == 2 and not m.data["workouts"]
+    res = m.import_workouts(parsed, dry_run=False)
+    assert res["new_workouts"] == 2 and len(m.data["workouts"]) == 2
+    assert any(e["name"] == "Totally Made Up Move" for e in m.data["custom_exercises"])
+    later = sorted(m.data["workouts"], key=lambda x: x["started_at"])[1]
+    assert {p["kind"] for p in later["prs"]} >= {"max_weight"}          # 145 beat 135
+    assert later["summary"]["kcal_active"] > 0 and not later["summary"]["timed"]
+    again = m.import_workouts(si.parse_strong_csv(STRONG_SAMPLE, m.exercises()), dry_run=False)
+    assert again["new_workouts"] == 0 and again["already_imported"] == 2
+    assert m.delete_imported("strong") == 2 and not m.data["workouts"]
 
 
 if __name__ == "__main__":

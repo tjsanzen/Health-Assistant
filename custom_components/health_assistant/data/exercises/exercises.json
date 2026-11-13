@@ -71,6 +71,46 @@
     "instructions": [],
     "demo": "dip.gif"
   },
+  "chest_press_machine": {
+    "name": "Chest Press (Machine)",
+    "muscle": "Chest",
+    "equipment": "Machine",
+    "kind": "weight_reps",
+    "tier": 3,
+    "instructions": []
+  },
+  "incline_chest_press_machine": {
+    "name": "Incline Chest Press (Machine)",
+    "muscle": "Chest",
+    "equipment": "Machine",
+    "kind": "weight_reps",
+    "tier": 3,
+    "instructions": []
+  },
+  "close_grip_bench_press": {
+    "name": "Close-Grip Bench Press",
+    "muscle": "Chest",
+    "equipment": "Barbell",
+    "kind": "weight_reps",
+    "tier": 2,
+    "instructions": []
+  },
+  "db_chest_fly": {
+    "name": "Chest Fly (Dumbbell)",
+    "muscle": "Chest",
+    "equipment": "Dumbbell",
+    "kind": "weight_reps",
+    "tier": 4,
+    "instructions": []
+  },
+  "assisted_dip": {
+    "name": "Dip (Assisted)",
+    "muscle": "Chest",
+    "equipment": "Machine",
+    "kind": "weight_reps",
+    "tier": 3,
+    "instructions": []
+  },
   "deadlift": {
     "name": "Deadlift",
     "muscle": "Back",
@@ -142,6 +182,22 @@
     "tier": 2,
     "instructions": [],
     "demo": "t_bar_row.gif"
+  },
+  "assisted_pull_up": {
+    "name": "Pull-up (Assisted)",
+    "muscle": "Back",
+    "equipment": "Machine",
+    "kind": "weight_reps",
+    "tier": 3,
+    "instructions": []
+  },
+  "dead_hang": {
+    "name": "Dead Hang",
+    "muscle": "Back",
+    "equipment": "Bodyweight",
+    "kind": "duration",
+    "base_met": 3.0,
+    "instructions": []
   },
   "squat": {
     "name": "Squat",
@@ -242,6 +298,46 @@
     "instructions": [],
     "demo": "goblet_squat.gif"
   },
+  "hack_squat": {
+    "name": "Hack Squat",
+    "muscle": "Legs",
+    "equipment": "Machine",
+    "kind": "weight_reps",
+    "tier": 3,
+    "instructions": []
+  },
+  "hip_abductor": {
+    "name": "Hip Abductor (Machine)",
+    "muscle": "Legs",
+    "equipment": "Machine",
+    "kind": "weight_reps",
+    "tier": 4,
+    "instructions": []
+  },
+  "hip_adductor": {
+    "name": "Hip Adductor (Machine)",
+    "muscle": "Legs",
+    "equipment": "Machine",
+    "kind": "weight_reps",
+    "tier": 4,
+    "instructions": []
+  },
+  "glute_kickback": {
+    "name": "Glute Kickback (Machine)",
+    "muscle": "Legs",
+    "equipment": "Machine",
+    "kind": "weight_reps",
+    "tier": 4,
+    "instructions": []
+  },
+  "step_up": {
+    "name": "Step-up",
+    "muscle": "Legs",
+    "equipment": "Dumbbell",
+    "kind": "weight_reps",
+    "tier": 3,
+    "instructions": []
+  },
   "overhead_press": {
     "name": "Overhead Press",
     "muscle": "Shoulders",
@@ -308,6 +404,22 @@
     "instructions": [],
     "demo": "face_pull.gif"
   },
+  "shoulder_press_machine": {
+    "name": "Shoulder Press (Machine)",
+    "muscle": "Shoulders",
+    "equipment": "Machine",
+    "kind": "weight_reps",
+    "tier": 3,
+    "instructions": []
+  },
+  "upright_row": {
+    "name": "Upright Row",
+    "muscle": "Shoulders",
+    "equipment": "Barbell",
+    "kind": "weight_reps",
+    "tier": 3,
+    "instructions": []
+  },
   "barbell_curl": {
     "name": "Barbell Curl",
     "muscle": "Arms",
@@ -362,6 +474,30 @@
     "instructions": [],
     "demo": "overhead_tricep_ext.gif"
   },
+  "machine_curl": {
+    "name": "Bicep Curl (Machine)",
+    "muscle": "Arms",
+    "equipment": "Machine",
+    "kind": "weight_reps",
+    "tier": 4,
+    "instructions": []
+  },
+  "bench_dip": {
+    "name": "Bench Dip",
+    "muscle": "Arms",
+    "equipment": "Bodyweight",
+    "kind": "bodyweight_reps",
+    "tier": 4,
+    "instructions": []
+  },
+  "seated_dip_machine": {
+    "name": "Seated Dip (Machine)",
+    "muscle": "Arms",
+    "equipment": "Machine",
+    "kind": "weight_reps",
+    "tier": 3,
+    "instructions": []
+  },
   "plank": {
     "name": "Plank",
     "muscle": "Core",
@@ -398,6 +534,22 @@
     "instructions": [],
     "demo": "ab_wheel.gif"
   },
+  "pallof_press": {
+    "name": "Pallof Press",
+    "muscle": "Core",
+    "equipment": "Cable",
+    "kind": "weight_reps",
+    "tier": 4,
+    "instructions": []
+  },
+  "farmers_carry": {
+    "name": "Farmer's Carry",
+    "muscle": "Core",
+    "equipment": "Dumbbell",
+    "kind": "duration",
+    "base_met": 6.0,
+    "instructions": []
+  },
   "treadmill": {
     "name": "Treadmill",
     "muscle": "Cardio",
@@ -433,5 +585,53 @@
     "base_met": 8.0,
     "instructions": [],
     "demo": "stair_climber.gif"
+  },
+  "walking": {
+    "name": "Walking",
+    "muscle": "Cardio",
+    "equipment": "None",
+    "kind": "distance",
+    "base_met": 3.5,
+    "instructions": []
+  },
+  "elliptical": {
+    "name": "Elliptical",
+    "muscle": "Cardio",
+    "equipment": "Machine",
+    "kind": "duration",
+    "base_met": 5.0,
+    "instructions": []
+  },
+  "swimming": {
+    "name": "Swimming",
+    "muscle": "Cardio",
+    "equipment": "None",
+    "kind": "distance",
+    "base_met": 6.0,
+    "instructions": []
+  },
+  "dance_fitness": {
+    "name": "Dance Fitness (Zumba)",
+    "muscle": "Cardio",
+    "equipment": "None",
+    "kind": "duration",
+    "base_met": 6.5,
+    "instructions": []
+  },
+  "stretching": {
+    "name": "Stretching",
+    "muscle": "Mobility",
+    "equipment": "None",
+    "kind": "duration",
+    "base_met": 2.3,
+    "instructions": []
+  },
+  "baseball": {
+    "name": "Baseball",
+    "muscle": "Sports",
+    "equipment": "None",
+    "kind": "duration",
+    "base_met": 5.0,
+    "instructions": []
   }
 }

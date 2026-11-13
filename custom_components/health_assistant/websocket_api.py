@@ -107,6 +107,7 @@ def _overview(hass, model: HealthModel, msg):
         "workouts_7d": model.workouts_since(7),
         "food_db": hass.data[DOMAIN]["food_db"].available,
         "chime_url": hass.data[DOMAIN].get("chime_url"),
+        "chime_wav_url": hass.data[DOMAIN].get("chime_wav_url"),
         "steps": model.steps_summary(),
     }
 
@@ -253,6 +254,15 @@ async def _live_test(hass, model, msg):
     return {"sent_to": f"notify.{msg['service']}"}
 
 
+@command("live/test_sound", {vol.Required("service"): str, vol.Required("sound"): vol.In(["chime", "default"])})
+async def _live_test_sound(hass, model, msg):
+    from .live_activity import LiveActivity
+    if not hass.services.has_service("notify", msg["service"]):
+        raise ValidationError(f"notify.{msg['service']} doesn't exist")
+    await LiveActivity(hass, lambda: model.profile, lambda x: x).async_test_sound(msg["service"], msg["sound"])
+    return {"sent_to": f"notify.{msg['service']}"}
+
+
 @command("steps/sensors")
 def _steps_sensors(hass, model, msg):
     from .iphone import step_sensors
@@ -294,6 +304,28 @@ def _workout_delete(hass, model, msg):
 @command("workout/calendar", {vol.Required("year"): int, vol.Required("month"): int})
 def _workout_calendar(hass, model, msg):
     return model.workout_calendar(msg["year"], msg["month"])
+
+
+@command("import/strong", {vol.Required("csv"): str, vol.Optional("dry_run", default=True): bool})
+async def _import_strong(hass, model, msg):
+    from homeassistant.util import dt as dt_util
+    from .strong_import import parse_strong_csv
+
+    await hass.async_add_executor_job(hass.data[DOMAIN]["library"].all)
+    parsed = await hass.async_add_executor_job(
+        lambda: parse_strong_csv(msg["csv"], model.exercises(), units=model.profile.get("units", "imperial"),
+                                 tz=dt_util.get_default_time_zone()))
+    return model.import_workouts(parsed, dry_run=msg["dry_run"])
+
+
+@command("import/status", {vol.Optional("source", default="strong"): str})
+def _import_status(hass, model, msg):
+    return {"count": sum(1 for w in model.data["workouts"] if w.get("source") == msg["source"])}
+
+
+@command("import/undo", {vol.Optional("source", default="strong"): str})
+def _import_undo(hass, model, msg):
+    return {"removed": model.delete_imported(msg["source"])}
 
 
 @command("records")

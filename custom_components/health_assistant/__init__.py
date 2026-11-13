@@ -79,6 +79,12 @@ async def _async_register_panel(hass: HomeAssistant) -> None:
         if await hass.async_add_executor_job(os.path.isfile, chime):
             paths.append(StaticPathConfig("/health_assistant_sounds/chime.mp3", chime, cache_headers=True))
             domain["chime_url"] = "/health_assistant_sounds/chime.mp3"
+        # Same chime as a notification sound for the iPhone (32-bit float 48 kHz WAV, the format
+        # the Companion app imports), offered as a download in Profile.
+        wav = os.path.join(DATA_DIR, "health_assistant_chime.wav")
+        if await hass.async_add_executor_job(os.path.isfile, wav):
+            paths.append(StaticPathConfig("/health_assistant_sounds/health_assistant_chime.wav", wav, cache_headers=True))
+            domain["chime_wav_url"] = "/health_assistant_sounds/health_assistant_chime.wav"
         await hass.http.async_register_static_paths(paths)
         domain["static_registered"] = True
     if not domain.get("cards_registered"):

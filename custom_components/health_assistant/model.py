@@ -24,7 +24,7 @@ PROFILE_FIELDS = {
     # Manual targets (None = use the calculated value)
     "calorie_target_override", "protein_override_g", "carbs_override_g", "fat_override_g",
     # Workout settings
-    "rest_default_s", "live_activity_notify",
+    "rest_default_s", "live_activity_notify", "rest_sound",
     # iPhone: step sensor from the Companion app, and Apple Health export
     "steps_sensor", "apple_health_export", "apple_health_shortcut",
 }
@@ -619,6 +619,71 @@ class HealthModel:
             w["apple_health_saved"] = True
             self._changed()
         return w
+
+    def import_workouts(self, parsed: dict, dry_run: bool = True) -> dict:
+        """Add workouts from an importer (e.g. strong_import). Safe to run twice: known ids are skipped."""
+        known = {w["id"] for w in self.data["workouts"]}
+        new = [w for w in parsed["workouts"] if w["id"] not in known]
+        unmatched = [m for m in parsed["matches"] if not m["exercise_id"]]
+        result = {
+            "workouts_in_file": len(parsed["workouts"]),
+            "new_workouts": len(new),
+            "already_imported": len(parsed["workouts"]) - len(new),
+            "sets": sum(len(e["sets"]) for w in new for e in w["exercises"]),
+            "first": new[0]["started_at"] if new else None,
+            "last": new[-1]["started_at"] if new else None,
+            "matches": parsed["matches"],
+            "skipped_empty_sets": parsed.get("skipped_empty_sets", 0),
+            "new_custom_exercises": [m["strong"] for m in unmatched],
+            "dry_run": dry_run,
+        }
+        if dry_run or not new:
+            return result
+
+        # Exercises the library couldn't match become custom exercises (named as in Strong).
+        have = {e["id"] for e in self.exercises()}
+        names = {m.get("custom_id"): m["strong"] for m in unmatched}
+        for w in new:
+            for ex in w["exercises"]:
+                if ex["exercise_id"] not in have:
+                    name = names.get(ex["exercise_id"], ex["exercise_id"])
+                    self.data["custom_exercises"].append({
+                        "id": ex["exercise_id"], "name": name, "muscle": "Other", "equipment": "Other",
+                        "kind": "weight_reps", "tier": 3, "instructions": [], "demo_url": None, "custom": True,
+                    })
+                    have.add(ex["exercise_id"])
+
+        # Chronological so PRs are judged against what came before each workout.
+        lib = {e["id"]: e for e in self.exercises()}
+        everything = sorted(self.data["workouts"] + new, key=lambda w: w["started_at"])
+        new_ids = {w["id"] for w in new}
+        for i, w in enumerate(everything):
+            if w["id"] not in new_ids:
+                continue
+            before = self._best_by_exercise(everything[:i])
+            now = self._best_by_exercise([w])
+            prs = []
+            for ex_id, rec in now.items():
+                prev = before.get(ex_id)
+                if not prev:
+                    continue
+                for key in ("max_weight", "max_e1rm", "max_reps", "max_volume_set"):
+                    if rec[key] and (prev[key] is None or rec[key]["value"] > prev[key]["value"]):
+                        prs.append({"exercise_id": ex_id, "kind": key, "value": rec[key]["value"]})
+            w["prs"] = prs
+            w["summary"] = self.workout_summary(w)
+            cal = workout_calories(w, lib, self.weight_at(w["started_at"]))
+            w["summary"].update({k: v for k, v in cal.items() if k != "by_exercise"})
+            w["summary"]["kcal_by_exercise"] = cal["by_exercise"]
+        self.data["workouts"].extend(new)
+        self._changed()
+        return result
+
+    def delete_imported(self, source: str = "strong") -> int:
+        before = len(self.data["workouts"])
+        self.data["workouts"] = [w for w in self.data["workouts"] if w.get("source") != source]
+        self._changed()
+        return before - len(self.data["workouts"])
 
     def delete_workout(self, workout_id: str) -> None:
         self.data["workouts"] = [w for w in self.data["workouts"] if w["id"] != workout_id]

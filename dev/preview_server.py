@@ -26,13 +26,14 @@ DATA_FILE = os.path.join(HERE, "dev_data.json")
 pkg = types.ModuleType("hp")
 pkg.__path__ = [PKG]
 sys.modules["hp"] = pkg
-for name in ("const", "calculations", "library", "model", "food_db"):
+for name in ("const", "calculations", "library", "model", "food_db", "strong_import"):
     spec = importlib.util.spec_from_file_location(f"hp.{name}", os.path.join(PKG, f"{name}.py"))
     mod = importlib.util.module_from_spec(spec)
     sys.modules[f"hp.{name}"] = mod
     spec.loader.exec_module(mod)
 model_mod = sys.modules["hp.model"]
 FoodDatabase = sys.modules["hp.food_db"].FoodDatabase
+strong = sys.modules["hp.strong_import"]
 library = sys.modules["hp.library"].ExerciseLibrary(demo_url="/custom_components/health_assistant/data/demos")
 
 db = FoodDatabase([os.path.join(PKG, "data", "foods.db")])
@@ -148,6 +149,11 @@ C = {
     "workout/delete": lambda m, workout_id: m.delete_workout(workout_id),
     "records": lambda m: m.records(),
     "workout/calendar": lambda m, year, month: m.workout_calendar(year, month),
+    "import/strong": lambda m, csv, dry_run=True: m.import_workouts(
+        strong.parse_strong_csv(csv, m.exercises(), units=m.profile.get("units", "imperial"),
+                                tz=datetime.now().astimezone().tzinfo), dry_run=dry_run),
+    "import/status": lambda m, source="strong": {"count": sum(1 for w in m.data["workouts"] if w.get("source") == source)},
+    "import/undo": lambda m, source="strong": {"removed": m.delete_imported(source)},
     "templates/list": lambda m: sorted(m.data["templates"], key=lambda t: t["name"].lower()),
     "templates/save": lambda m, template: m.save_template(template),
     "templates/from_workout": lambda m, workout_id, name=None: m.template_from_workout(workout_id, name),

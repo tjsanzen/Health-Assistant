@@ -20,6 +20,11 @@ from .const import PANEL_URL_PATH
 
 _LOGGER = logging.getLogger(__name__)
 TAG = "health_assistant_workout"
+# Separate, ordinary notification at the end of each rest: unlike a Live Activity update it can
+# carry a sound, which iOS plays through connected headphones even with the app closed.
+REST_TAG = "health_assistant_rest_over"
+CHIME_FILE = "health_assistant_chime.wav"  # imported into the Companion app (see README)
+REST_SOUNDS = ("chime", "default", "off")
 # The Companion app draws Live Activity icons from Material Design Icons only (no custom
 # images), so this is the closest match to brand/icon.png, in the same blue.
 ICON = "mdi:food-apple"
@@ -59,6 +64,7 @@ class LiveActivity:
         elif event == "rest":
             self._workout = payload["workout"]
             self._cancel_timer()
+            self._clear_rest_alert()
             rest = payload["rest"]
             if rest:
                 self._next = rest.get("next")
@@ -70,6 +76,7 @@ class LiveActivity:
         elif event == "workout_ended":
             self._cancel_timer()
             self._workout = None
+            self._clear_rest_alert()
             self._call({"message": "clear_notification", "data": {"tag": TAG}})
 
     def _cancel_timer(self) -> None:
@@ -77,13 +84,53 @@ class LiveActivity:
             self._rest_timer()
             self._rest_timer = None
 
+    @property
+    def rest_sound(self) -> str:
+        v = self._profile().get("rest_sound") or "chime"
+        return v if v in REST_SOUNDS else "chime"
+
     @callback
     def _rest_over(self, _now) -> None:
         self._rest_timer = None
-        if self._workout:
-            # Not silent: this update is what buzzes your phone when rest is done.
-            msg = f"Rest over · Next: {self._next}" if self._next else "Rest over — time for your next set"
+        if not self._workout:
+            return
+        msg = f"Rest over · Next: {self._next}" if self._next else "Rest over — time for your next set"
+        sound = self.rest_sound
+        if sound == "off":
+            # Live Activity update only: buzzes the phone, no sound in headphones.
             self._send_workout(silent=False, message=msg)
+            return
+        self._send_workout(silent=True, message=msg)
+        self._send_rest_alert(msg, sound)
+
+    def _send_rest_alert(self, message: str, sound: str) -> None:
+        """Rest-over notification with a sound. Time-sensitive so it gets through Focus modes;
+        replaced by the next one (same tag) and cleared when the next rest starts."""
+        w = self._workout or {}
+        self._call({
+            "title": w.get("name") or "Workout",
+            "message": message,
+            "data": {
+                "tag": REST_TAG, "url": f"/{PANEL_URL_PATH}",
+                "push": {
+                    "sound": CHIME_FILE if sound == "chime" else "default",
+                    "interruption-level": "time-sensitive",
+                },
+            },
+        })
+
+    def _clear_rest_alert(self) -> None:
+        if self.rest_sound != "off":
+            self._call({"message": "clear_notification", "data": {"tag": REST_TAG}})
+
+    async def async_test_sound(self, service: str, sound: str) -> None:
+        await self.hass.services.async_call("notify", service, {
+            "title": "Health Assistant",
+            "message": "Rest over — this is how the end of a rest will sound",
+            "data": {"tag": "health_assistant_test_sound", "push": {
+                "sound": CHIME_FILE if sound == "chime" else "default",
+                "interruption-level": "time-sensitive"}},
+        }, blocking=True)
 
     # ------------------------------------------------------------- payloads
     # Shapes follow https://companion.home-assistant.io/docs/notifications/live-activities/
