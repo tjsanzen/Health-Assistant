@@ -29,6 +29,9 @@ PROFILE_FIELDS = {
     "steps_sensor", "apple_health_export", "apple_health_shortcut",
 }
 STEPS_AVG_DAYS = 14
+FAT_WEEK_MIN_DAYS = 5          # logged days (of the last 7) before "fat burned this week" shows
+KCAL_PER_LB_FAT_LOW = 3436     # range used for the estimate
+KCAL_PER_LB_FAT_HIGH = 3752
 LIFT_TRACK_MIN_DAYS = 14   # logging this long switches activity to logged workouts
 LIFT_WINDOW_DAYS = 28      # average training time over the last 4 weeks
 LIFT_MAX_SESSION_H = 3.0   # cap forgotten-to-finish workouts
@@ -91,6 +94,11 @@ class HealthModel:
     @property
     def profile(self) -> dict:
         return self.data["profile"]
+
+    def set_user(self, user_id: str | None) -> None:
+        """Link this profile to a Home Assistant user (admin action; not a regular profile field)."""
+        self.profile["user_id"] = user_id or None
+        self._changed()
 
     def update_profile(self, changes: dict) -> dict:
         for k, v in changes.items():
@@ -366,6 +374,7 @@ class HealthModel:
         past = {d: v for d, v in by_day.items() if d < today.isoformat()}
         energy = self.energy()
         target = energy["target"] if energy else None
+        maintenance = energy.get("maintenance") if energy else None
 
         def window(days: int | None) -> dict:
             if days is None:
@@ -391,10 +400,27 @@ class HealthModel:
             day = (today - timedelta(days=back)).isoformat()
             series.append({"date": day, "kcal": round(by_day.get(day, {}).get("kcal", 0))})
 
+        # Fat burned over the last 7 finished days, from logged days only (an unlogged day
+        # says nothing about what you ate). Only meaningful while eating below maintenance.
+        week_days = [(today - timedelta(days=b)).isoformat() for b in range(1, 8)]
+        logged = [by_day[d]["kcal"] for d in week_days if d in by_day]
+        fat_week = None
+        if maintenance and target is not None and target < maintenance:
+            deficit = sum(maintenance - k for k in logged)
+            fat_week = {
+                "days_logged": len(logged), "min_days": FAT_WEEK_MIN_DAYS,
+                "deficit_kcal": round(deficit),
+                # 3,436–3,752 kcal per lb of body fat: the high kcal/lb gives the low estimate.
+                "lb_low": round(max(0.0, deficit) / KCAL_PER_LB_FAT_HIGH, 2),
+                "lb_high": round(max(0.0, deficit) / KCAL_PER_LB_FAT_LOW, 2),
+                "show": len(logged) >= FAT_WEEK_MIN_DAYS,
+            }
+
         first = min(by_day) if by_day else None
         return {
             "d7": window(7), "d30": window(30), "all": window(None),
             "first_day": first, "streak": streak, "series": series, "target": target,
+            "maintenance": round(maintenance) if maintenance else None, "fat_week": fat_week,
         }
 
     def add_custom_food(self, food: dict) -> dict:

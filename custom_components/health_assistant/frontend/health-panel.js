@@ -176,7 +176,7 @@ class HealthAssistantPanel extends HTMLElement {
   /* ------------------------------------------------------------- data I/O */
   async ws(cmd, data = {}) {
     const msg = { type: `${DOMAIN}/${cmd}`, ...data };
-    if (this._s.profileId && cmd !== "profiles") msg.profile_id = this._s.profileId;
+    if (this._s.profileId && !["profiles", "users", "profile/link"].includes(cmd)) msg.profile_id = this._s.profileId;
     return this._hass.callWS(msg);
   }
 
@@ -187,7 +187,10 @@ class HealthAssistantPanel extends HTMLElement {
       const profiles = await this.ws("profiles");
       this._s.profiles = profiles;
       if (!profiles.length) { this._s.loading = false; this._s.error = "noprofile"; return this._render(); }
-      const saved = localStorage.getItem("ha-health-profile");
+      // Open on your own profile. An admin who switches to someone else's stays there only for
+      // this browser tab (sessionStorage), so the next visit starts on their own again.
+      let saved = null;
+      try { saved = sessionStorage.getItem("ha-health-profile"); localStorage.removeItem("ha-health-profile"); } catch (_) { /* storage off */ }
       this._s.profileId = (profiles.find((p) => p.id === saved) || profiles.find((p) => p.mine) || profiles[0]).id;
       await this._loadAll();
     } catch (e) {
@@ -301,6 +304,12 @@ class HealthAssistantPanel extends HTMLElement {
     this._render();
   }
 
+  _linkedName() {
+    const p = this._s.profiles.find((x) => x.id === this._s.profileId);
+    if (!p?.user_id) return "Not linked";
+    return this._hass?.user?.id === p.user_id ? `${p.user_name || "You"} (you)` : p.user_name || "Linked";
+  }
+
   _profileSelect() {
     return this._s.profiles.length > 1
       ? `<select class="profilesel" data-change="profile" aria-label="Profile">${this._s.profiles.map((p) => `<option value="${p.id}" ${p.id === this._s.profileId ? "selected" : ""}>${esc(p.name)}</option>`).join("")}</select>` : "";
@@ -349,7 +358,9 @@ class HealthAssistantPanel extends HTMLElement {
   _view() {
     const s = this._s;
     if (s.loading) return `<div class="empty">Loading…</div>`;
-    if (s.error === "noprofile") return `<div class="card empty"><h2>No profile yet</h2><p>Add the <b>Health Assistant</b> integration in Settings → Devices & services to create your profile.</p></div>`;
+    if (s.error === "noprofile") return this._hass?.user?.is_admin
+      ? `<div class="card empty"><h2>No profile yet</h2><p>Add the <b>Health Assistant</b> integration in Settings → Devices & services to create a profile, and link it to your Home Assistant user.</p></div>`
+      : `<div class="card empty"><h2>No profile for you yet</h2><p>Ask a Home Assistant admin to add a Health Assistant profile and link it to your user (<b>${esc(this._hass?.user?.name || "you")}</b>).</p></div>`;
     if (s.error) return `<div class="card empty"><h2>Something went wrong</h2><p>${esc(s.error)}</p></div>`;
     switch (s.tab) {
       case "history": return this._viewHistory();
@@ -707,15 +718,28 @@ class HealthAssistantPanel extends HTMLElement {
     if (!st) return "";
     const W = [["d7", "7 days"], ["d30", "30 days"], ["all", `All (${st.all.days_logged}d)`]];
     const row = (label, key, unit) => `<tr><th>${label}</th>${W.map(([k]) => { const v = st[k].avg[key]; return `<td>${v == null ? "–" : r0(v) + unit}</td>`; }).join("")}</tr>`;
-    const max = Math.max(st.target || 0, ...st.series.map((d) => d.kcal), 1) * 1.08;
+    const max = Math.max(st.target || 0, st.maintenance || 0, ...st.series.map((d) => d.kcal), 1) * 1.08;
     const today = localDate();
     const bars = st.series.map((d) => {
       const h = (d.kcal / max) * 100;
-      const over = st.target && d.kcal > st.target * 1.1;
+      // Red above maintenance; orange above target (+10%) but still under maintenance.
+      const overM = st.maintenance && d.kcal > st.maintenance;
+      const over = !overM && st.target && d.kcal > st.target * 1.1;
       const dt = new Date(d.date + "T12:00:00");
-      return `<div class="bcol" title="${fmtDate(d.date + "T12:00:00")}: ${r0(d.kcal)} kcal"><div class="bbar ${over ? "over" : ""} ${d.date === today ? "today" : ""}" style="height:${h}%"></div><span>${"SMTWTFS"[dt.getDay()]}</span></div>`;
+      return `<div class="bcol" title="${fmtDate(d.date + "T12:00:00")}: ${r0(d.kcal)} kcal${overM ? " · over maintenance" : ""}"><div class="bbar ${overM ? "overm" : over ? "over" : ""} ${d.date === today ? "today" : ""}" style="height:${h}%"></div><span>${"SMTWTFS"[dt.getDay()]}</span></div>`;
     }).join("");
-    const tl = st.target ? `<div class="tline" style="bottom:${(st.target / max) * 100}%"><span>${r0(st.target)}</span></div>` : "";
+    // Labels sit on opposite sides so they don't collide when the lines are close together.
+    const tl = (st.target ? `<div class="tline" style="bottom:${(st.target / max) * 100}%"><span>Target ${r0(st.target)}</span></div>` : "")
+      + (st.maintenance && Math.round(st.maintenance) !== Math.round(st.target || 0)
+        ? `<div class="tline mline" style="bottom:${(st.maintenance / max) * 100}%"><span>Maintenance ${r0(st.maintenance)}</span></div>` : "");
+    const fw = st.fat_week;
+    const fatCard = fw?.show ? (() => {
+      const u = this._units, f = (lb) => u.imp ? lb : lb / 2.20462, unit = u.imp ? "lb" : "kg";
+      const lo = f(fw.lb_low), hi = f(fw.lb_high);
+      const val = fw.deficit_kcal <= 0 ? `0<small> ${unit}</small>` : `${lo.toFixed(2)}–${hi.toFixed(2)}<small> ${unit}</small>`;
+      return `<div class="card mini fatweek"><div class="muted small">${icon("mdi:fire")} Estimated fat burned this week</div><div class="big">${val}</div>
+        <div class="muted xsmall">${fw.deficit_kcal > 0 ? `${r0(fw.deficit_kcal)} kcal under maintenance` : `${r0(-fw.deficit_kcal)} kcal over maintenance`} · last 7 days (${fw.days_logged} logged) · 3,436–3,752 kcal per lb</div></div>`;
+    })() : "";
     const d30 = st.d30;
     return `<div class="card stats-card">
         <h3>Averages</h3>
@@ -723,7 +747,9 @@ class HealthAssistantPanel extends HTMLElement {
         <tbody>${row("Calories", "kcal", "")}${row("Protein", "protein", " g")}${row("Carbs", "carbs", " g")}${row("Fat", "fat", " g")}</tbody></table>
         <div class="muted xsmall">Averages use days you logged food, not counting today.</div>
       </div>
-      <div class="card"><h3>Last 14 days</h3><div class="bars"><div class="plot">${tl}${bars}</div></div></div>
+      <div class="card"><h3>Last 14 days</h3><div class="bars"><div class="plot">${tl}${bars}</div></div>
+        ${st.maintenance ? `<div class="blegend muted xsmall"><span><i class="sw"></i>Under target</span><span><i class="sw over"></i>Over target</span><span><i class="sw overm"></i>Over maintenance</span></div>` : ""}</div>
+      ${fatCard}
       <div class="minitiles">
         <div class="card mini"><div class="muted small">Logging streak</div><div class="big">${st.streak}<small> day${st.streak === 1 ? "" : "s"}</small></div></div>
         <div class="card mini"><div class="muted small">On target · 30 days</div><div class="big">${d30.on_target_days ?? "–"}<small> / ${d30.days_logged}</small></div><div class="muted xsmall">within ±10%</div></div>
@@ -863,6 +889,7 @@ class HealthAssistantPanel extends HTMLElement {
       <div class="card list">
         <button class="listrow" data-action="workoutSettings">${icon("mdi:timer-cog-outline")}<span>iPhone, rest timer & Apple Health</span><span class="muted">${fmtRest(p.rest_default_s ?? 120)}${p.live_activity_notify ? " · iPhone" : ""}</span>${icon("mdi:chevron-right", "muted")}</button>
         <button class="listrow" data-action="editProfile">${icon("mdi:account-edit-outline")}<span>Body & goal</span><span></span>${icon("mdi:chevron-right", "muted")}</button>
+        ${this._hass?.user?.is_admin ? `<button class="listrow" data-action="linkUser">${icon("mdi:account-key-outline")}<span>Home Assistant user</span><span class="muted">${esc(this._linkedName())}</span>${icon("mdi:chevron-right", "muted")}</button>` : ""}
         <button class="listrow" data-action="importOpen">${icon("mdi:database-import-outline")}<span>Import workout history</span><span class="muted">Strong</span>${icon("mdi:chevron-right", "muted")}</button>
       </div>`;
   }
@@ -1576,6 +1603,22 @@ class HealthAssistantPanel extends HTMLElement {
           await this.ws("profile/update", { changes });
           s.sheets = []; await this._loadAll(); this._render(); this._toast(action === "resetTargets" ? "Using calculated targets" : "Targets saved"); break;
         }
+        case "linkUser": {
+          const [users, profiles] = await Promise.all([this.ws("users"), this.ws("profiles")]);
+          const cur = profiles.find((p) => p.id === s.profileId);
+          const taken = Object.fromEntries(profiles.filter((p) => p.user_id && p.id !== s.profileId).map((p) => [p.user_id, p.name]));
+          const link = async (uid) => {
+            await this.ws("profile/link", { profile_id: s.profileId, user_id: uid });
+            s.profiles = await this.ws("profiles"); this._render(); this._toast("Saved");
+          };
+          this._actionSheet("Who is this profile for?", [
+            ...users.map((u) => ({ label: u.name, sub: taken[u.id] ? `Already has a profile: ${taken[u.id]}` : "",
+              on: cur?.user_id === u.id, icon: "mdi:account-outline",
+              run: () => (taken[u.id] ? this._toast(`${u.name} already has a profile`, true) : link(u.id)) })),
+            { label: "Not linked", sub: "Only admins can open it", on: !cur?.user_id, icon: "mdi:account-off-outline", run: () => link(null) },
+          ], "They'll see this profile when they open Health. Other non-admin users can't see it.");
+          break;
+        }
         case "workoutSettings": {
           const sh = { kind: "workoutSettings", targets: null, sensors: [] };
           this._openSheet(sh);
@@ -1723,7 +1766,7 @@ class HealthAssistantPanel extends HTMLElement {
       sh.busy = null; this._renderSheet();
     }
     else if (d.change === "profile") {
-      s.profileId = t.value; localStorage.setItem("ha-health-profile", t.value);
+      s.profileId = t.value; try { sessionStorage.setItem("ha-health-profile", t.value); } catch (_) { /* storage off */ }
       s.workouts = null; s.records = null; s.last = {}; s.loading = true; this._render();
       await this._loadAll(); s.loading = false; this._render();
     }
@@ -1919,7 +1962,13 @@ main { flex:1 1 auto; min-height:0; overflow-y:auto; -webkit-overflow-scrolling:
 .bcol { flex:1; height:100%; display:flex; flex-direction:column; justify-content:flex-end; align-items:center; position:relative; }
 .bcol span { position:absolute; bottom:-18px; font-size:.65rem; color:var(--hp-muted); }
 .bbar { width:100%; max-width:22px; background:color-mix(in srgb, var(--hp-accent) 50%, transparent); border-radius:4px 4px 2px 2px; min-height:2px; }
-.bbar.today { background:var(--hp-accent); } .bbar.over { background:#ff9500; }
+.bbar.today { background:var(--hp-accent); } .bbar.over { background:#ff9500; } .bbar.overm { background:#ff3b30; }
+.tline.mline { border-top-style:dotted; border-top-color:#ff3b30; }
+.tline.mline span { right:auto; left:0; color:#ff3b30; }
+.blegend { display:flex; gap:12px; flex-wrap:wrap; margin-top:4px; }
+.blegend .sw { display:inline-block; width:9px; height:9px; border-radius:2px; margin-right:4px; vertical-align:-1px; background:color-mix(in srgb, var(--hp-accent) 50%, transparent); }
+.blegend .sw.over { background:#ff9500; } .blegend .sw.overm { background:#ff3b30; }
+.fatweek .small ha-icon { --mdc-icon-size:16px; color:#ff9500; vertical-align:-3px; }
 .tline { position:absolute; left:0; right:0; border-top:1.5px dashed var(--hp-muted); opacity:.7; z-index:1; pointer-events:none; }
 .tline span { position:absolute; right:0; top:-15px; font-size:.65rem; color:var(--hp-muted); }
 .minitiles { display:grid; grid-template-columns:1fr 1fr; gap:12px; }

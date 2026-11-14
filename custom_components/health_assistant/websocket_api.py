@@ -1,8 +1,12 @@
 """Websocket commands used by the Health panel.
 
 Every command takes an optional ``profile_id`` (a config entry id). When it is
-omitted the profile linked to the logged-in Home Assistant user is used,
-falling back to the first profile.
+omitted the profile linked to the logged-in Home Assistant user is used.
+
+Who can see what: each profile is linked to one Home Assistant user. Non-admin
+users only ever reach their own profile; admins can open every profile (and
+manage which user each one is linked to). An admin with no linked profile of
+their own falls back to the first profile.
 """
 from __future__ import annotations
 
@@ -34,20 +38,38 @@ def _entries(hass: HomeAssistant):
             if e.state is ConfigEntryState.LOADED]
 
 
-def _resolve(hass: HomeAssistant, connection, profile_id: str | None) -> HealthModel:
+def _user(connection) -> tuple[str | None, bool]:
+    u = connection.user
+    return (u.id, bool(u.is_admin)) if u else (None, False)
+
+
+def _visible(hass: HomeAssistant, connection) -> list:
+    """Profiles this user may open: their own, or all of them for an admin."""
+    uid, admin = _user(connection)
     entries = _entries(hass)
-    if not entries:
+    return entries if admin else [e for e in entries if uid and e.runtime_data.model.profile.get("user_id") == uid]
+
+
+def _resolve_entry(hass: HomeAssistant, connection, profile_id: str | None):
+    if not _entries(hass):
         raise ValidationError("No Health Assistant profile is set up")
+    entries = _visible(hass, connection)
     if profile_id:
         for e in entries:
             if e.entry_id == profile_id:
-                return e.runtime_data.model
+                return e
         raise ValidationError("Profile not found")
-    uid = connection.user.id if connection.user else None
+    uid, _ = _user(connection)
     for e in entries:
         if e.runtime_data.model.profile.get("user_id") == uid:
-            return e.runtime_data.model
-    return entries[0].runtime_data.model
+            return e
+    if entries:
+        return entries[0]
+    raise ValidationError("No Health Assistant profile is linked to your Home Assistant user")
+
+
+def _resolve(hass: HomeAssistant, connection, profile_id: str | None) -> HealthModel:
+    return _resolve_entry(hass, connection, profile_id).runtime_data.model
 
 
 @callback
@@ -59,6 +81,18 @@ def async_register_websocket_commands(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(
         hass, f"{DOMAIN}/profiles", _ws_profiles,
         websocket_api.BASE_COMMAND_MESSAGE_SCHEMA.extend({vol.Required("type"): f"{DOMAIN}/profiles"}),
+    )
+    websocket_api.async_register_command(
+        hass, f"{DOMAIN}/users", _ws_users,
+        websocket_api.BASE_COMMAND_MESSAGE_SCHEMA.extend({vol.Required("type"): f"{DOMAIN}/users"}),
+    )
+    websocket_api.async_register_command(
+        hass, f"{DOMAIN}/profile/link", _ws_profile_link,
+        websocket_api.BASE_COMMAND_MESSAGE_SCHEMA.extend({
+            vol.Required("type"): f"{DOMAIN}/profile/link",
+            vol.Required("profile_id"): str,
+            vol.Required("user_id"): vol.Any(str, None),
+        }),
     )
     for cmd, extra, fn in _COMMANDS:
         schema = websocket_api.BASE_COMMAND_MESSAGE_SCHEMA.extend({
@@ -84,14 +118,50 @@ def _make_handler(fn: Handler):
     return handler
 
 
-@callback
-def _ws_profiles(hass: HomeAssistant, connection, msg: dict) -> None:
-    uid = connection.user.id if connection.user else None
+@websocket_api.async_response
+async def _ws_profiles(hass: HomeAssistant, connection, msg: dict) -> None:
+    uid, admin = _user(connection)
+    names = {u.id: u.name for u in await hass.auth.async_get_users()} if admin else {}
     out = []
-    for e in _entries(hass):
+    for e in _visible(hass, connection):
         p = e.runtime_data.model.profile
-        out.append({"id": e.entry_id, "name": p.get("name"), "mine": p.get("user_id") == uid})
+        out.append({"id": e.entry_id, "name": p.get("name"), "user_id": p.get("user_id"),
+                    "user_name": names.get(p.get("user_id")),
+                    "mine": bool(uid) and p.get("user_id") == uid})
     connection.send_result(msg["id"], out)
+
+
+@websocket_api.require_admin
+@websocket_api.async_response
+async def _ws_users(hass: HomeAssistant, connection, msg: dict) -> None:
+    """People an admin can link a profile to."""
+    users = [u for u in await hass.auth.async_get_users() if not u.system_generated and u.is_active]
+    connection.send_result(msg["id"], [{"id": u.id, "name": u.name or u.id} for u in users])
+
+
+@websocket_api.require_admin
+@websocket_api.async_response
+async def _ws_profile_link(hass: HomeAssistant, connection, msg: dict) -> None:
+    """Change which Home Assistant user a profile belongs to (admins only)."""
+    entry = next((e for e in _entries(hass) if e.entry_id == msg["profile_id"]), None)
+    if not entry:
+        connection.send_error(msg["id"], "not_found", "Profile not found")
+        return
+    uid = msg["user_id"] or None
+    if uid and not await hass.auth.async_get_user(uid):
+        connection.send_error(msg["id"], "invalid", "That Home Assistant user doesn't exist")
+        return
+    for e in _entries(hass):
+        if uid and e is not entry and e.runtime_data.model.profile.get("user_id") == uid:
+            connection.send_error(msg["id"], "invalid",
+                                  f"That user already has a profile ({e.runtime_data.model.profile.get('name')})")
+            return
+    entry.runtime_data.model.set_user(uid)
+    # Keep the entry in step: setup uses the user id as the unique id.
+    data = {**entry.data, "user_id": uid}
+    new_uid = uid or entry.runtime_data.model.profile.get("name", "").lower()
+    hass.config_entries.async_update_entry(entry, data=data, unique_id=new_uid)
+    connection.send_result(msg["id"], {"user_id": uid})
 
 
 # ------------------------------------------------------------------- overview

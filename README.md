@@ -65,6 +65,18 @@ icon: mdi:silverware-fork-knife               # optional
 - **Gauge colours:** blue up to 90% of your target, green within ±10%, red when you're over.
 - **Log a meal dialog:** OpenNutrition search, recent foods and Quick add, logged to the meal you pick.
 
+## More than one person
+
+Each person gets their own profile, linked to their Home Assistant user. Whoever opens **Health** in the sidebar sees their own data.
+
+1. Make sure each person has their own Home Assistant user (Settings → People) and signs in with it on their phone.
+2. Add the integration again for each person (Settings → Devices & services → Add integration → Health Assistant), and pick their user under **Linked user**.
+3. To change who a profile belongs to later, an admin opens that profile and goes to **Profile → Home Assistant user**.
+
+Non-admin users only ever see their own profile. Admins can switch between all profiles with the picker in the header. Each visit starts on your own profile, and a switch only lasts for that browser tab. A user with no linked profile is asked to have an admin set one up.
+
+Dashboard cards show the viewer's own profile unless the card sets `profile:`. For non-admin users, a card set to someone else's profile shows an error.
+
 ## Importing your workout history (Strong)
 
 Profile → Settings → **Import workout history** → pick a CSV exported from the Strong app (Settings → Export Data).

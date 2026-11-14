@@ -191,6 +191,26 @@ def test_food_stats():
     assert len(st["series"]) == 14 and st["series"][-1]["kcal"] == 500
 
 
+def test_fat_burned_this_week():
+    m, clock, _ = make()  # 80 kg -> 75 kg target: a deficit
+    maint = m.energy()["maintenance"]
+    for back in range(1, 5):  # 4 logged days: not enough yet
+        clock.t = datetime(2026, 11, 9, 12) - timedelta(days=back)
+        m.add_food({"name": "x", "kcal": round(maint) - 500})
+    clock.t = datetime(2026, 11, 9, 12)
+    st = m.food_stats()
+    assert st["maintenance"] == round(maint)
+    assert st["fat_week"]["days_logged"] == 4 and not st["fat_week"]["show"]
+    clock.t = datetime(2026, 11, 4, 12)
+    m.add_food({"name": "x", "kcal": round(maint) - 500})
+    clock.t = datetime(2026, 11, 9, 12)
+    fw = m.food_stats()["fat_week"]
+    assert fw["show"] and abs(fw["deficit_kcal"] - 2500) <= 5
+    assert abs(fw["lb_low"] - 2500 / 3752) < 0.01 and abs(fw["lb_high"] - 2500 / 3436) < 0.01
+    m.update_profile({"target_weight_kg": 80})  # maintain: no estimate
+    assert m.food_stats()["fat_week"] is None
+
+
 def test_rest_timer_and_events():
     m, clock, _ = make()
     m.update_profile({"rest_default_s": 90})
