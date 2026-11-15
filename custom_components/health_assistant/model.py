@@ -29,6 +29,11 @@ PROFILE_FIELDS = {
     "steps_sensor", "apple_health_export", "apple_health_shortcut",
 }
 STEPS_AVG_DAYS = 14
+FIBER_G_PER_1000_KCAL = 14
+LEARN_MIN_DAYS = 5          # logged days (of the last 7) before recommendations appear
+LEARN_FIBER_SHARE = 0.75    # under 75% of the fiber goal
+LEARN_LOW_KCAL_GAP = 750    # this far under maintenance per day is too low
+LEARN_FOOD_MIN_TIMES = 3
 FAT_WEEK_MIN_DAYS = 5          # logged days (of the last 7) before "fat burned this week" shows
 KCAL_PER_LB_FAT_LOW = 3436     # range used for the estimate
 KCAL_PER_LB_FAT_HIGH = 3752
@@ -179,6 +184,8 @@ class HealthModel:
             # Carbs fill whatever calories the fixed macros leave.
             out["carbs_g"] = round(max(0.0, (out["target"] - out["protein_g"] * 4 - out["fat_g"] * 9) / 4), 1)
         out["macros_manual"] = manual_macros
+        # Fiber: 14 g per 1,000 kcal eaten (US Dietary Guidelines), a minimum to reach.
+        out["fiber_g"] = round(out["target"] * FIBER_G_PER_1000_KCAL / 1000)
         return out
 
     # ---------------------------------------------------------------- lifting
@@ -360,15 +367,65 @@ class HealthModel:
             "remaining": round(target - totals["kcal"], 1) if target else None,
             "macro_targets": {
                 "protein": energy["protein_g"], "fat": energy["fat_g"], "carbs": energy["carbs_g"],
+                "fiber": energy["fiber_g"],
             } if energy else None,
         }
+
+    def learn(self) -> dict:
+        """Learn tab: dietary recommendations from the last 7 finished days of food logs."""
+        today = self._now().date()
+        days = [(today - timedelta(days=b)).isoformat() for b in range(1, 8)]
+        logs = [i for i in self.data["food_log"] if i["date"] in days]
+        by_day: dict[str, dict] = {}
+        for i in logs:
+            d = by_day.setdefault(i["date"], {"kcal": 0.0, "fiber": 0.0})
+            d["kcal"] += i.get("kcal") or 0
+            d["fiber"] += i.get("fiber") or 0
+        n = len(by_day)
+        energy = self.energy() or {}
+        maintenance, fiber_goal = energy.get("maintenance"), energy.get("fiber_g")
+        recs = []
+        if n >= LEARN_MIN_DAYS:
+            avg_kcal = sum(v["kcal"] for v in by_day.values()) / n
+            avg_fiber = sum(v["fiber"] for v in by_day.values()) / n
+            if fiber_goal and avg_fiber < fiber_goal * LEARN_FIBER_SHARE:
+                recs.append({"kind": "fiber_low", "icon": "mdi:sprout",
+                             "title": "You may want to consider increasing your daily fiber intake.",
+                             "avg": round(avg_fiber, 1), "goal": fiber_goal})
+            if maintenance and avg_kcal > maintenance:
+                recs.append({"kind": "kcal_high", "icon": "mdi:arrow-down-bold-circle-outline",
+                             "title": "You may want to consider decreasing your daily caloric intake.",
+                             "avg": round(avg_kcal), "maintenance": round(maintenance)})
+            elif maintenance and avg_kcal < maintenance - LEARN_LOW_KCAL_GAP:
+                recs.append({"kind": "kcal_low", "icon": "mdi:arrow-up-bold-circle-outline",
+                             "title": "You may want to consider increasing your daily caloric intake.",
+                             "avg": round(avg_kcal), "maintenance": round(maintenance)})
+
+        # Highest-calorie food logged 3+ times this week (quick adds aren't a "food").
+        groups: dict[str, dict] = {}
+        for i in logs:
+            if i.get("unit") == "quick":
+                continue
+            key = i.get("food_id") or f"{(i.get('name') or '').strip().lower()}|{(i.get('brand') or '').strip().lower()}"
+            g = groups.setdefault(key, {"name": i.get("name"), "brand": i.get("brand"), "count": 0, "kcal": 0.0})
+            g["count"] += 1
+            g["kcal"] += i.get("kcal") or 0
+        frequent = [g for g in groups.values() if g["count"] >= LEARN_FOOD_MIN_TIMES]
+        cut_back = None
+        if frequent:
+            g = max(frequent, key=lambda x: x["kcal"] / x["count"])
+            week_kcal = sum(v["kcal"] for v in by_day.values())
+            cut_back = {"name": g["name"], "brand": g["brand"], "count": g["count"],
+                        "kcal_each": round(g["kcal"] / g["count"]), "kcal_week": round(g["kcal"]),
+                        "share": round(g["kcal"] / week_kcal * 100) if week_kcal else None}
+        return {"days_logged": n, "min_days": LEARN_MIN_DAYS, "recommendations": recs, "cut_back": cut_back}
 
     def food_stats(self) -> dict:
         """Averages over logged days. Today is excluded because it isn't finished yet."""
         today = self._now().date()
         by_day: dict[str, dict] = {}
         for i in self.data["food_log"]:
-            d = by_day.setdefault(i["date"], {"kcal": 0.0, "protein": 0.0, "carbs": 0.0, "fat": 0.0})
+            d = by_day.setdefault(i["date"], {"kcal": 0.0, "protein": 0.0, "carbs": 0.0, "fat": 0.0, "fiber": 0.0})
             for k in d:
                 d[k] += i.get(k) or 0
         past = {d: v for d, v in by_day.items() if d < today.isoformat()}
@@ -384,7 +441,7 @@ class HealthModel:
                 picked = {d: v for d, v in past.items() if d >= start}
             n = len(picked)
             avg = {k: round(sum(v[k] for v in picked.values()) / n, 1) if n else None
-                   for k in ("kcal", "protein", "carbs", "fat")}
+                   for k in ("kcal", "protein", "carbs", "fat", "fiber")}
             on_target = None
             if n and target:
                 on_target = sum(1 for v in picked.values() if abs(v["kcal"] - target) <= target * 0.1)

@@ -358,3 +358,24 @@ if __name__ == "__main__":
         if name.startswith("test_"):
             fn()
             print("ok", name)
+
+
+def test_learn_recommendations():
+    m, clock, _ = make()
+    e = m.energy()
+    maint, fiber = round(e["maintenance"]), e["fiber_g"]
+    for back in range(1, 6):
+        clock.t = datetime(2026, 11, 9, 12) - timedelta(days=back)
+        m.add_food({"name": "Pizza", "kcal": maint + 300, "fiber": fiber * 0.5})
+        m.add_food({"name": "Apple", "kcal": 95, "fiber": 4})
+    clock.t = datetime(2026, 11, 9, 12)
+    L = m.learn()
+    kinds = {r["kind"] for r in L["recommendations"]}
+    assert L["days_logged"] == 5 and kinds == {"fiber_low", "kcal_high"}
+    assert L["cut_back"]["name"] == "Pizza" and L["cut_back"]["count"] == 5
+    m2, clock2, _ = make()
+    for back in range(1, 6):
+        clock2.t = datetime(2026, 11, 9, 12) - timedelta(days=back)
+        m2.add_food({"name": "Salad", "kcal": maint - 900, "fiber": fiber})
+    clock2.t = datetime(2026, 11, 9, 12)
+    assert [r["kind"] for r in m2.learn()["recommendations"]] == ["kcal_low"]

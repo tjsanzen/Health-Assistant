@@ -11,8 +11,8 @@ const MEALS = ["breakfast", "lunch", "dinner", "snack"];
 const mealForNow = (h = new Date().getHours() + new Date().getMinutes() / 60) =>
   h >= 4 && h < 10.5 ? "breakfast" : h >= 10.5 && h < 14.5 ? "lunch" : h >= 16.5 && h < 21 ? "dinner" : "snack";
 const TABS = [
-  { id: "history", label: "History", icon: "mdi:history", title: "History" },
-  { id: "workout", label: "Start Workout", icon: "mdi:plus", title: "Workout" },
+  { id: "learn", label: "Learn", icon: "mdi:lightbulb-on-outline", title: "Learn" },
+  { id: "workout", label: "Workout", icon: "mdi:dumbbell", title: "Workout" },
   { id: "nutrition", label: "Nutrition", icon: "mdi:silverware-fork-knife", title: "Nutrition" },
   { id: "profile", label: "Profile", icon: "mdi:account-circle", title: "Profile" },
 ];
@@ -127,9 +127,9 @@ class HealthAssistantPanel extends HTMLElement {
     super();
     this.attachShadow({ mode: "open" });
     this._s = {
-      tab: localStorage.getItem("ha-health-tab") || "nutrition",
+      tab: ({ history: "workout" })[localStorage.getItem("ha-health-tab")] || localStorage.getItem("ha-health-tab") || "nutrition",
       profiles: [], profileId: null, overview: null, loading: true, error: null,
-      historyMode: "workouts", workouts: null, workoutsTotal: 0, records: null,
+      historyMode: "templates", workouts: null, learn: null, workoutsTotal: 0, records: null,
       templates: null, exercises: [], active: null, last: {},
       day: localDate(), food: null, stats: null, vitals: {}, sheets: [],
     };
@@ -214,7 +214,8 @@ class HealthAssistantPanel extends HTMLElement {
 
   async _loadTab() {
     const s = this._s;
-    if (s.tab === "history") {
+    if (s.tab === "learn") s.learn = await this.ws("learn");
+    if (s.tab === "workout" && !s.active) {
       if (s.historyMode === "workouts" && !s.workouts) {
         const res = await this.ws("workout/list", { offset: 0, limit: 20 });
         s.workouts = res.items; s.workoutsTotal = res.total;
@@ -328,12 +329,12 @@ class HealthAssistantPanel extends HTMLElement {
       return `<button class="navbtn ${on ? "on" : ""} ${isW ? "center" : ""}" data-action="tab" data-tab="${t.id}" ${isW && bottom ? 'data-center="1"' : ""}>
         <span class="navicon">${icon(isW && s.active ? "mdi:dumbbell" : t.icon)}</span><span class="navlabel">${label}</span></button>`;
     };
-    const [hist, work, nut, prof] = TABS;
+    const [learn, work, nut, prof] = TABS;
     root.getElementById("bottomnav").innerHTML =
       `<button class="navbtn" data-action="menu" aria-label="Home Assistant menu"><span class="navicon">${icon("mdi:menu")}</span><span class="navlabel">Menu</span></button>` +
-      btn(hist) + btn(work, true) + btn(nut) + btn(prof);
-    // Desktop header: right-aligned, with Start Workout furthest right.
-    root.getElementById("topnav").innerHTML = btn(hist) + btn(nut) + btn(prof) + btn(work);
+      btn(learn) + btn(work, true) + btn(nut) + btn(prof);
+    // Desktop header: right-aligned, with Workout furthest right.
+    root.getElementById("topnav").innerHTML = btn(learn) + btn(nut) + btn(prof) + btn(work);
     root.getElementById("profilepick").innerHTML = this._profileSelect();
   }
 
@@ -363,7 +364,7 @@ class HealthAssistantPanel extends HTMLElement {
       : `<div class="card empty"><h2>No profile for you yet</h2><p>Ask a Home Assistant admin to add a Health Assistant profile and link it to your user (<b>${esc(this._hass?.user?.name || "you")}</b>).</p></div>`;
     if (s.error) return `<div class="card empty"><h2>Something went wrong</h2><p>${esc(s.error)}</p></div>`;
     switch (s.tab) {
-      case "history": return this._viewHistory();
+      case "learn": return this._viewLearn();
       case "workout": return this._viewWorkout();
       case "nutrition": return this._viewNutrition();
       case "profile": return this._viewProfile();
@@ -374,13 +375,9 @@ class HealthAssistantPanel extends HTMLElement {
   /* ============================================================ HISTORY */
   _viewHistory() {
     const s = this._s;
-    const seg = `<div class="seg">
-      <button class="${s.historyMode === "workouts" ? "on" : ""}" data-action="historyMode" data-mode="workouts">Workouts</button>
-      <button class="${s.historyMode === "records" ? "on" : ""}" data-action="historyMode" data-mode="records">Records</button></div>`;
-    const head = this._head("History") + seg;
-    if (s.historyMode === "records") return head + this._viewRecords();
+    const head = "";
     if (!s.workouts) return head + `<div class="empty">Loading…</div>`;
-    if (!s.workouts.length) return head + `<div class="card empty">${icon("mdi:dumbbell", "bigicon")}<h2>No workouts yet</h2><p>Finished workouts show up here.</p><button class="btn primary" data-action="tab" data-tab="workout">Start a workout</button></div>`;
+    if (!s.workouts.length) return head + `<div class="card empty">${icon("mdi:dumbbell", "bigicon")}<h2>No workouts yet</h2><p>Finished workouts show up here.</p></div>`;
     let month = "";
     const items = s.workouts.map((w) => {
       const m = fmtDate(w.started_at, { month: "long", year: "numeric" });
@@ -506,6 +503,32 @@ class HealthAssistantPanel extends HTMLElement {
       <h3>History</h3>${rows || `<p class="muted">No sets logged yet.</p>`}`;
   }
 
+  /* ============================================================== LEARN */
+  _viewLearn() {
+    const L = this._s.learn;
+    const head = this._head("Learn");
+    if (!L) return head + `<div class="empty">Loading…</div>`;
+    const text = (r) => r.kind === "fiber_low"
+      ? `Over the past week you've averaged ${r1(r.avg)} g of fiber a day, below the USDA's ${r0(r.goal)} g.`
+      : r.kind === "kcal_high"
+        ? `Over the past 7 days, you've averaged ${r0(r.avg)} calories, above your maintenance amount of ${r0(r.maintenance)}.`
+        : `Over the past 7 days, you've averaged ${r0(r.avg)} calories, more than 750 below your maintenance amount of ${r0(r.maintenance)}.`;
+    let diet;
+    if (L.days_logged < L.min_days) {
+      diet = `<p class="muted">Log food on at least ${L.min_days} of the last 7 days to get recommendations. You've logged ${L.days_logged} so far.</p>`;
+    } else if (!L.recommendations.length) {
+      diet = `<div class="learnrow ok">${icon("mdi:check-circle-outline")}<div><b>Looking good.</b><div class="muted small">Your calories and fiber over the past 7 days are on track.</div></div></div>`;
+    } else {
+      diet = L.recommendations.map((r) => `<div class="learnrow ${r.kind}">${icon(r.icon)}<div><b>${esc(r.title)}</b><div class="muted small">${esc(text(r))}</div></div></div>`).join("");
+    }
+    const c = L.cut_back;
+    const cut = c ? `<div class="card"><h3>${icon("mdi:food-off-outline")} Worth cutting back on?</h3>
+        <div class="learnrow"><div><b>${esc(c.name)}</b>${c.brand ? ` <span class="muted small">${esc(c.brand)}</span>` : ""}
+        <div class="muted small">Your highest-calorie regular this week: logged ${c.count} times at about ${r0(c.kcal_each)} kcal each (${r0(c.kcal_week)} kcal${c.share != null ? `, ${c.share}% of what you ate` : ""}). Eating it less often, or a smaller portion, is an easy place to save calories.</div></div></div></div>` : "";
+    return head + `<div class="card"><h3>${icon("mdi:food-apple-outline")} Dietary recommendations</h3>${diet}
+        <div class="muted xsmall">Based on the last 7 days you logged food, not counting today.</div></div>${cut}`;
+  }
+
   /* ============================================================ WORKOUT */
   _viewWorkout() {
     const s = this._s;
@@ -516,13 +539,17 @@ class HealthAssistantPanel extends HTMLElement {
           <button class="iconbtn sm" data-action="deleteTemplate" data-id="${t.id}" aria-label="Delete">${icon("mdi:delete-outline")}</button></div></div>
         <div class="muted small">${t.exercises.map((e) => `${e.sets.length} × ${esc(this._exName(e.exercise_id))}`).join(" · ") || "No exercises"}</div>
         <button class="btn primary full" data-action="startWorkout" data-template="${t.id}">${icon("mdi:play")} Start</button></div>`).join("");
+    const mode = s.historyMode;
+    const seg = `<div class="seg">${[["templates", "Templates"], ["workouts", "Workouts"], ["records", "Records"]]
+      .map(([m, l]) => `<button class="${mode === m ? "on" : ""}" data-action="historyMode" data-mode="${m}">${l}</button>`).join("")}</div>`;
+    const body = mode === "workouts" ? this._viewHistory() : mode === "records" ? this._viewRecords()
+      : `<div class="row between section"><h3>Templates</h3><button class="btn ghost" data-action="newTemplate">${icon("mdi:plus")} New template</button></div>
+      ${tpls || `<div class="card empty small"><p>Save a workout as a template, or create one to start faster next time.</p></div>`}`;
     return this._head("Workout") + `<div class="card hero">
         ${icon("mdi:dumbbell", "bigicon")}
         <h2>Ready to train?</h2>
         <button class="btn primary big full" data-action="startWorkout">${icon("mdi:plus")} Start empty workout</button>
-      </div>
-      <div class="row between section"><h3>Templates</h3><button class="btn ghost" data-action="newTemplate">${icon("mdi:plus")} New template</button></div>
-      ${tpls || `<div class="card empty small"><p>Save a workout as a template, or create one to start faster next time.</p></div>`}`;
+      </div>${seg}${body}`;
   }
 
   _supersetLabels() {
@@ -703,7 +730,7 @@ class HealthAssistantPanel extends HTMLElement {
         <div class="sumright">
           <div class="row between small"><span>Eaten</span><b>${r0(t.kcal)}</b></div>
           <div class="row between small"><span>Target</span><b>${r0(target)}</b></div>
-          ${macro("protein", "Protein", "p")}${macro("carbs", "Carbs", "c")}${macro("fat", "Fat", "f")}
+          ${macro("protein", "Protein", "p")}${macro("carbs", "Carbs", "c")}${macro("fat", "Fat", "f")}${macro("fiber", "Fiber", "fb")}
         </div>
       </div>
       ${s.overview && !s.overview.food_db ? `<div class="card warn small">Food database not found — search shows only your custom foods. See the README to build it.</div>` : ""}
@@ -744,7 +771,7 @@ class HealthAssistantPanel extends HTMLElement {
     return `<div class="card stats-card">
         <h3>Averages</h3>
         <table class="avg"><thead><tr><th></th>${W.map(([, l]) => `<th>${l}</th>`).join("")}</tr></thead>
-        <tbody>${row("Calories", "kcal", "")}${row("Protein", "protein", " g")}${row("Carbs", "carbs", " g")}${row("Fat", "fat", " g")}</tbody></table>
+        <tbody>${row("Calories", "kcal", "")}${row("Protein", "protein", " g")}${row("Carbs", "carbs", " g")}${row("Fat", "fat", " g")}${row("Fiber", "fiber", " g")}</tbody></table>
         <div class="muted xsmall">Averages use days you logged food, not counting today.</div>
       </div>
       <div class="card"><h3>Last 14 days</h3><div class="bars"><div class="plot">${tl}${bars}</div></div>
@@ -773,7 +800,8 @@ class HealthAssistantPanel extends HTMLElement {
       body = `<div class="form">
         <label>Name<input data-q="name" value="Quick add"></label>
         <div class="grid2"><label>Calories<input data-q="kcal" inputmode="decimal"></label><label>Protein (g)<input data-q="protein" inputmode="decimal"></label>
-        <label>Carbs (g)<input data-q="carbs" inputmode="decimal"></label><label>Fat (g)<input data-q="fat" inputmode="decimal"></label></div>
+        <label>Carbs (g)<input data-q="carbs" inputmode="decimal"></label><label>Fat (g)<input data-q="fat" inputmode="decimal"></label>
+        <label>Fiber (g)<input data-q="fiber" inputmode="decimal"></label></div>
         <button class="btn primary full" data-action="quickAdd">Add to ${cap(sh.meal)}</button></div>`;
     } else {
       body = `<div class="form">
@@ -782,7 +810,8 @@ class HealthAssistantPanel extends HTMLElement {
         <label>Serving weight in grams (optional)<input data-c="serving_g" inputmode="decimal"></label>
         <p class="muted small">Nutrition per serving</p>
         <div class="grid2"><label>Calories<input data-c="kcal" inputmode="decimal"></label><label>Protein (g)<input data-c="protein" inputmode="decimal"></label>
-        <label>Carbs (g)<input data-c="carbs" inputmode="decimal"></label><label>Fat (g)<input data-c="fat" inputmode="decimal"></label></div>
+        <label>Carbs (g)<input data-c="carbs" inputmode="decimal"></label><label>Fat (g)<input data-c="fat" inputmode="decimal"></label>
+        <label>Fiber (g)<input data-c="fiber" inputmode="decimal"></label></div>
         <button class="btn primary full" data-action="createCustomFood">Save food</button></div>`;
     }
     return `<h2>Add to ${cap(sh.meal)}</h2><div class="seg">${tabs}</div>${body}`;
@@ -1388,7 +1417,7 @@ class HealthAssistantPanel extends HTMLElement {
           const w = await this.ws("workout/finish");
           s.active = null; s.workouts = null; s.records = null; s.last = {};
           await this._refreshOverview();
-          s.tab = "history"; localStorage.setItem("ha-health-tab", "history");
+          s.tab = "workout"; s.historyMode = "workouts"; localStorage.setItem("ha-health-tab", "workout");
           await this._loadTab(); this._render();
           this._openSheet({ kind: "html", html: this._sheetWorkout(w) });
           const kc = w.summary?.kcal_active != null ? ` · ${r0(w.summary.kcal_active)} kcal` : "";
@@ -1518,14 +1547,14 @@ class HealthAssistantPanel extends HTMLElement {
           const get = (k) => this.shadowRoot.querySelector(`[data-q="${k}"]`)?.value;
           if (!num(get("kcal")) && !num(get("protein")) && !num(get("carbs")) && !num(get("fat"))) { this._toast("Enter at least calories", true); break; }
           await this.ws("food/log", { entry: { date: s.day, meal: this._sheet.meal, name: get("name") || "Quick add", amount: 1, unit: "quick",
-            kcal: num(get("kcal")) || 0, protein: num(get("protein")) || 0, carbs: num(get("carbs")) || 0, fat: num(get("fat")) || 0, remember: false } });
+            kcal: num(get("kcal")) || 0, protein: num(get("protein")) || 0, carbs: num(get("carbs")) || 0, fat: num(get("fat")) || 0, fiber: num(get("fiber")) || 0, remember: false } });
           s.sheets = []; await this._reloadFood(); this._render(); this._toast("Added"); break;
         }
         case "createCustomFood": {
           const get = (k) => this.shadowRoot.querySelector(`[data-c="${k}"]`)?.value;
           const food = await this.ws("food/custom/create", { food: {
             name: get("name"), brand: get("brand") || null, serving_qty: num(get("serving_qty")) || 1, serving_unit: get("serving_unit") || "serving",
-            serving_g: num(get("serving_g")), kcal: num(get("kcal")) || 0, protein: num(get("protein")) || 0, carbs: num(get("carbs")) || 0, fat: num(get("fat")) || 0,
+            serving_g: num(get("serving_g")), kcal: num(get("kcal")) || 0, protein: num(get("protein")) || 0, carbs: num(get("carbs")) || 0, fat: num(get("fat")) || 0, fiber: num(get("fiber")) || 0,
           } });
           const sh = this._sheet; sh.custom = [food, ...(sh.custom || [])]; sh.mode = "search";
           this._openSheet({ kind: "portion", food, amount: 1, unit: "serving", meal: sh.meal });
@@ -1874,6 +1903,11 @@ main { flex:1 1 auto; min-height:0; overflow-y:auto; -webkit-overflow-scrolling:
 .iconbtn.sm { width:32px; height:32px; }
 .iconbtn[disabled] { opacity:.3; }
 .linklike { text-align:left; }
+.learnrow { display:flex; gap:10px; align-items:flex-start; padding:8px 0; }
+.learnrow + .learnrow { border-top:1px solid var(--hp-line); }
+.learnrow > ha-icon { flex:0 0 auto; margin-top:1px; color:#ff9500; }
+.learnrow.ok > ha-icon { color:#34c759; } .learnrow.fiber_low > ha-icon { color:#34c759; }
+.learnrow.kcal_high > ha-icon { color:#ff3b30; } .learnrow.kcal_low > ha-icon { color:#007aff; }
 .seg { display:flex; background:var(--hp-fill); border-radius:10px; padding:2px; margin-bottom:14px; }
 .seg button { flex:1; padding:7px; border-radius:8px; color:var(--hp-text); font-weight:500; font-size:.9rem; }
 .seg button.on { background:var(--hp-card); box-shadow:0 1px 3px rgba(0,0,0,.12); font-weight:600; }
@@ -1948,7 +1982,7 @@ main { flex:1 1 auto; min-height:0; overflow-y:auto; -webkit-overflow-scrolling:
 .sumright { flex:1; display:flex; flex-direction:column; gap:5px; min-width:0; }
 .bar { height:7px; background:var(--hp-fill); border-radius:4px; overflow:hidden; margin:3px 0; }
 .fill { height:100%; border-radius:4px; background:var(--hp-accent); transition:width .4s; }
-.fill.p { background:#ff3b30; } .fill.c { background:#ff9500; } .fill.f { background:#af52de; }
+.fill.p { background:#ff3b30; } .fill.c { background:#ff9500; } .fill.f { background:#af52de; } .fill.fb { background:#34c759; }
 .meal h3 { margin:0; }
 .foodrow { display:flex; width:100%; justify-content:space-between; align-items:center; gap:10px; text-align:left; padding:10px 2px; border-top:1px solid var(--hp-line); }
 .foodrow > div { min-width:0; } .foodrow .kcal { font-weight:600; white-space:nowrap; font-variant-numeric:tabular-nums; }

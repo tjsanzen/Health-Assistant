@@ -333,6 +333,11 @@ async def _live_test_sound(hass, model, msg):
     return {"sent_to": f"notify.{msg['service']}"}
 
 
+@command("learn")
+def _learn(hass, model, msg):
+    return model.learn()
+
+
 @command("steps/sensors")
 def _steps_sensors(hass, model, msg):
     from .iphone import step_sensors

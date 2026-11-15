@@ -345,7 +345,8 @@ class LogMealDialog extends HTMLElement {
     if (s.mode === "quick") {
       bd.innerHTML = `${meals}${tabs}<label>Name<input data-q="name" value="Quick add"></label>
         <div class="grid2" style="margin-top:10px"><label>Calories<input data-q="kcal" inputmode="decimal"></label><label>Protein (g)<input data-q="protein" inputmode="decimal"></label>
-        <label>Carbs (g)<input data-q="carbs" inputmode="decimal"></label><label>Fat (g)<input data-q="fat" inputmode="decimal"></label></div>
+        <label>Carbs (g)<input data-q="carbs" inputmode="decimal"></label><label>Fat (g)<input data-q="fat" inputmode="decimal"></label>
+        <label>Fiber (g)<input data-q="fiber" inputmode="decimal"></label></div>
         <button class="btn" data-act="quick">Add to ${cap(s.meal)}</button>`;
       return;
     }
@@ -431,7 +432,7 @@ class LogMealDialog extends HTMLElement {
         if (!get("kcal") && !get("protein") && !get("carbs") && !get("fat")) return;
         b.disabled = true;
         await this.card.ws("food/log", { entry: { date: localDate(), meal: s.meal, name: this.shadowRoot.querySelector('[data-q="name"]').value || "Quick add",
-          amount: 1, unit: "quick", kcal: get("kcal"), protein: get("protein"), carbs: get("carbs"), fat: get("fat"), remember: false } });
+          amount: 1, unit: "quick", kcal: get("kcal"), protein: get("protein"), carbs: get("carbs"), fat: get("fat"), fiber: get("fiber"), remember: false } });
         this.card.notify(`Added ${r0(get("kcal"))} kcal to ${s.meal}`);
         this.close();
       }
