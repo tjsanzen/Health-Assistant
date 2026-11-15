@@ -85,6 +85,10 @@ async def _async_register_panel(hass: HomeAssistant) -> None:
         if await hass.async_add_executor_job(os.path.isfile, wav):
             paths.append(StaticPathConfig("/health_assistant_sounds/health_assistant_chime.wav", wav, cache_headers=True))
             domain["chime_wav_url"] = "/health_assistant_sounds/health_assistant_chime.wav"
+        # Learn tab lessons: images and files next to the .md files in data/lessons
+        from .lessons import LESSONS_DIR, LESSONS_URL
+        await hass.async_add_executor_job(lambda: os.makedirs(LESSONS_DIR, exist_ok=True))
+        paths.append(StaticPathConfig(LESSONS_URL, LESSONS_DIR, cache_headers=False))
         await hass.http.async_register_static_paths(paths)
         domain["static_registered"] = True
     if not domain.get("cards_registered"):

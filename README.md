@@ -65,6 +65,19 @@ icon: mdi:silverware-fork-knife               # optional
 - **Gauge colours:** blue up to 90% of your target, green within ±10%, red when you're over.
 - **Log a meal dialog:** OpenNutrition search, recent foods and Quick add, logged to the meal you pick.
 
+## Lessons (Learn tab)
+
+Put Markdown files in `custom_components/health_assistant/data/lessons/`. Each one shows up as a card under **Lessons** in the Learn tab, and tapping the card opens the article.
+
+- The title comes from the file name: `intro_to_nutrition.md` becomes **Intro to Nutrition**. A file that starts with its own `# Title` line uses that title in the article.
+- Cards are sorted by file name. Start names with a number (`01_…`, `02_…`) to choose the order; the number isn't shown.
+- The first paragraph is the card's description.
+- Images in the same folder can be linked by file name: `![Plate](plate.png)`.
+- Supported formatting: headings, bold, italic, code, lists, links, quotes, tables, images and dividers.
+- Edits show up the next time you open the Learn tab, without a restart.
+
+`example.md` shows the format. HACS replaces the integration folder when it updates, so keep a copy of your own lessons outside it.
+
 ## More than one person
 
 Each person gets their own profile, linked to their Home Assistant user. Whoever opens **Health** in the sidebar sees their own data.
@@ -95,7 +108,7 @@ Profile → Settings → **Import workout history** → pick a CSV exported from
 
 ## Rest-over sound in your headphones
 
-When a rest timer ends, Health Assistant sends your phone a notification with a sound, so you hear it through your headphones even when the app is closed. Pick the sound in **Profile → iPhone, rest timer & Apple Health → Sound when rest is over**:
+When a rest timer ends, Health Assistant sends your phone a notification with a sound, so you hear it through your headphones even when the app is closed. Pick the sound in **Profile → Phone, rest timer & Apple Health → Sound when rest is over**:
 
 - **Chime**: the same chime the panel plays. Import it into the Companion app once: tap *download the chime file* in that sheet, save `health_assistant_chime.wav` to Files or iCloud Drive, then in the Home Assistant app go to **Settings → Companion app → Notifications → Sounds → Import custom sound**, pick the file, and restart the iPhone. Until it's imported, iOS plays its default sound.
 - **iPhone default sound**: the standard notification tone.
@@ -103,15 +116,23 @@ When a rest timer ends, Health Assistant sends your phone a notification with a 
 
 The notification is time-sensitive, so it gets through Focus modes. Each one is cleared when your next rest starts. The ring/silent switch still applies.
 
-## Steps from your iPhone
+## Steps from your phone (iPhone or Android)
 
-When you pick your phone during setup, Health Assistant connects that phone's Companion app step sensor (`sensor.<phone>_steps`). You can change it under Profile → iPhone, rest timer & Apple Health.
+When you pick your phone during setup, Health Assistant connects that phone's best Companion app step sensor. You can change it under Profile → Phone, rest timer & Apple Health.
+
+| Phone | Sensor | Counts |
+| --- | --- | --- |
+| Android | **Health Connect daily steps** (preferred) | Steps since midnight from Health Connect, so a watch or fitness app that syncs there is included. Needs Health Connect permission in the Companion app. |
+| iPhone | **Apple Health steps** (preferred) | Steps since midnight from Apple Health, including an Apple Watch. |
+| iPhone | Pedometer **Steps** | Steps the iPhone itself detects. |
+| Android | Phone pedometer **Steps sensor** | Counts up from the last reboot. Health Assistant adds each increase to the day's total, so it starts counting from the first reading after you connect it. |
+
 - Health Assistant keeps one total per day.
 - Once 3 days are recorded, your 14-day average replaces the steps you entered at setup in the maintenance-calorie estimate.
 - The Steps tile on the Profile tab shows today's count, your average and the last 30 days.
-- New sensors: `Steps today` and `Average steps`.
+- Sensors: `Steps today` and `Average steps`.
 
-The sensor counts steps your iPhone detects, not your Apple Watch. If it's missing, turn it on in the Companion app under Settings → Companion app → Sensors.
+If a sensor is missing, turn it on in the Companion app under Settings → Companion app → Sensors. On Android, the pedometer updates every 15 minutes by default; you can make it faster under Sensor Update Frequency.
 
 ## How numbers are calculated
 

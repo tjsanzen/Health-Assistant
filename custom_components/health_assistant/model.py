@@ -262,6 +262,11 @@ class HealthModel:
         self._changed()
         return True
 
+    def set_steps_raw(self, value: dict) -> None:
+        """Last raw reading of a since-reboot step counter (Android pedometer)."""
+        self.data["steps_raw"] = value
+        self._changed()
+
     def steps_today(self) -> int | None:
         return self.data["steps_log"].get(self.today())
 

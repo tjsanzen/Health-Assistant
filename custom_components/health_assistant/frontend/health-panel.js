@@ -50,6 +50,75 @@ const PR_LABELS = {
 
 /* ---------------------------------------------------------------- helpers */
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+/* --- Markdown for Learn lessons (data/lessons/*.md). Small and safe: everything is escaped
+   first, then a known set of formatting is added back. Links may only be http(s), mailto or
+   relative (relative ones point into the lessons folder). */
+function mdToHtml(src, base = "") {
+  const safeUrl = (u) => {
+    u = u.trim();
+    if (/^(https?:|mailto:)/i.test(u)) return u;
+    if (/^[a-z][a-z0-9+.-]*:/i.test(u) || u.startsWith("//")) return "#";
+    return u.startsWith("/") ? u : `${base}/${u.replace(/^\.\//, "")}`;
+  };
+  const inline = (t) => {
+    const codes = [];
+    t = esc(t).replace(/`([^`]+)`/g, (_, c) => `\u0000${codes.push(c) - 1}\u0000`);
+    t = t
+      .replace(/!\[([^\]]*)\]\(([^)\s]+)(?:\s+&quot;([^&]*)&quot;)?\)/g, (_, a, u, ti) => `<img src="${safeUrl(u)}" alt="${a}"${ti ? ` title="${ti}"` : ""} loading="lazy">`)
+      .replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (_, l, u) => { const h = safeUrl(u); return `<a href="${h}"${/^https?:/i.test(h) ? ' target="_blank" rel="noopener noreferrer"' : ""}>${l}</a>`; })
+      .replace(/\*\*([^*]+)\*\*|__([^_]+)__/g, (_, a, b) => `<strong>${a || b}</strong>`)
+      .replace(/(^|[^*\w])\*([^*\s][^*]*)\*(?!\*)/g, "$1<em>$2</em>")
+      .replace(/(^|[^_\w])_([^_\s][^_]*)_(?![_\w])/g, "$1<em>$2</em>")
+      .replace(/~~([^~]+)~~/g, "<del>$1</del>");
+    return t.replace(/\u0000(\d+)\u0000/g, (_, i) => `<code>${codes[+i]}</code>`);
+  };
+  const lines = String(src).replace(/\r\n?/g, "\n").split("\n");
+  const out = [];
+  let i = 0;
+  const isBlockStart = (l) => /^(#{1,6}\s|>|```|\s*([-*+]|\d+[.)])\s|\s*(-{3,}|\*{3,}|_{3,})\s*$|\|)/.test(l);
+  while (i < lines.length) {
+    const l = lines[i];
+    if (!l.trim()) { i++; continue; }
+    let m;
+    if ((m = l.match(/^```\s*(\S*)/))) {
+      const buf = []; i++;
+      while (i < lines.length && !/^```/.test(lines[i])) buf.push(lines[i++]);
+      i++; out.push(`<pre><code>${esc(buf.join("\n"))}</code></pre>`); continue;
+    }
+    if ((m = l.match(/^(#{1,6})\s+(.*?)\s*#*\s*$/))) { const n = m[1].length; out.push(`<h${n}>${inline(m[2])}</h${n}>`); i++; continue; }
+    if (/^\s*(-{3,}|\*{3,}|_{3,})\s*$/.test(l)) { out.push("<hr>"); i++; continue; }
+    if (/^>/.test(l)) {
+      const buf = [];
+      while (i < lines.length && /^>/.test(lines[i])) buf.push(lines[i++].replace(/^>\s?/, ""));
+      out.push(`<blockquote>${mdToHtml(buf.join("\n"), base)}</blockquote>`); continue;
+    }
+    if (/^\|/.test(l) && i + 1 < lines.length && /^\|?\s*:?-{2,}/.test(lines[i + 1])) {
+      const cells = (r) => r.trim().replace(/^\||\|$/g, "").split("|").map((c) => c.trim());
+      const head = cells(l); i += 2;
+      const rows = [];
+      while (i < lines.length && /^\|/.test(lines[i])) rows.push(cells(lines[i++]));
+      out.push(`<div class="mdtable"><table><thead><tr>${head.map((h) => `<th>${inline(h)}</th>`).join("")}</tr></thead><tbody>${rows.map((r) => `<tr>${r.map((c) => `<td>${inline(c)}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`);
+      continue;
+    }
+    if ((m = l.match(/^\s*([-*+]|\d+[.)])\s+/))) {
+      const ordered = /\d/.test(m[1]);
+      const items = [];
+      while (i < lines.length && (m = lines[i].match(/^\s*([-*+]|\d+[.)])\s+(.*)/)) && /\d/.test(m[1]) === ordered) {
+        let text = m[2]; i++;
+        while (i < lines.length && /^\s{2,}\S/.test(lines[i]) && !/^\s*([-*+]|\d+[.)])\s/.test(lines[i])) text += " " + lines[i++].trim();
+        const task = text.match(/^\[([ xX])\]\s+(.*)/);
+        items.push(task ? `<li class="task">${task[1] === " " ? "☐" : "☑"} ${inline(task[2])}</li>` : `<li>${inline(text)}</li>`);
+      }
+      out.push(ordered ? `<ol>${items.join("")}</ol>` : `<ul>${items.join("")}</ul>`); continue;
+    }
+    const buf = [];
+    while (i < lines.length && lines[i].trim() && !isBlockStart(lines[i])) buf.push(lines[i++].trim());
+    if (!buf.length) { buf.push(lines[i++].trim()); }
+    out.push(`<p>${buf.map(inline).join(" ")}</p>`);
+  }
+  return out.join("\n");
+}
 const r0 = (n) => (n == null || isNaN(n) ? "–" : Math.round(n).toLocaleString());
 const r1 = (n) => (n == null || isNaN(n) ? "–" : (Math.round(n * 10) / 10).toLocaleString());
 const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
@@ -129,7 +198,7 @@ class HealthAssistantPanel extends HTMLElement {
     this._s = {
       tab: ({ history: "workout" })[localStorage.getItem("ha-health-tab")] || localStorage.getItem("ha-health-tab") || "nutrition",
       profiles: [], profileId: null, overview: null, loading: true, error: null,
-      historyMode: "templates", workouts: null, learn: null, workoutsTotal: 0, records: null,
+      historyMode: "templates", workouts: null, learn: null, lessons: null, lesson: null, workoutsTotal: 0, records: null,
       templates: null, exercises: [], active: null, last: {},
       day: localDate(), food: null, stats: null, vitals: {}, sheets: [],
     };
@@ -214,7 +283,7 @@ class HealthAssistantPanel extends HTMLElement {
 
   async _loadTab() {
     const s = this._s;
-    if (s.tab === "learn") s.learn = await this.ws("learn");
+    if (s.tab === "learn") [s.learn, s.lessons] = await Promise.all([this.ws("learn"), this.ws("lessons/list")]);
     if (s.tab === "workout" && !s.active) {
       if (s.historyMode === "workouts" && !s.workouts) {
         const res = await this.ws("workout/list", { offset: 0, limit: 20 });
@@ -505,7 +574,9 @@ class HealthAssistantPanel extends HTMLElement {
 
   /* ============================================================== LEARN */
   _viewLearn() {
-    const L = this._s.learn;
+    const s = this._s;
+    if (s.lesson) return this._viewLesson();
+    const L = s.learn;
     const head = this._head("Learn");
     if (!L) return head + `<div class="empty">Loading…</div>`;
     const text = (r) => r.kind === "fiber_low"
@@ -526,7 +597,25 @@ class HealthAssistantPanel extends HTMLElement {
         <div class="learnrow"><div><b>${esc(c.name)}</b>${c.brand ? ` <span class="muted small">${esc(c.brand)}</span>` : ""}
         <div class="muted small">Your highest-calorie regular this week: logged ${c.count} times at about ${r0(c.kcal_each)} kcal each (${r0(c.kcal_week)} kcal${c.share != null ? `, ${c.share}% of what you ate` : ""}). Eating it less often, or a smaller portion, is an easy place to save calories.</div></div></div></div>` : "";
     return head + `<div class="card"><h3>${icon("mdi:food-apple-outline")} Dietary recommendations</h3>${diet}
-        <div class="muted xsmall">Based on the last 7 days you logged food, not counting today.</div></div>${cut}`;
+        <div class="muted xsmall">Based on the last 7 days you logged food, not counting today.</div></div>${cut}${this._lessonsHtml()}`;
+  }
+
+  _lessonsHtml() {
+    const list = this._s.lessons;
+    if (!list?.length) return "";
+    return `<div class="row between section"><h3>Lessons</h3></div>
+      <div class="lessons">${list.map((l) => `<button class="card lesson" data-action="openLesson" data-slug="${esc(l.slug)}">
+        <div class="lmain"><b>${esc(l.title)}</b>${l.summary ? `<div class="muted small">${esc(l.summary)}</div>` : ""}<div class="muted xsmall">${l.minutes} min read</div></div>
+        ${icon("mdi:chevron-right", "muted")}</button>`).join("")}</div>`;
+  }
+
+  _viewLesson() {
+    const l = this._s.lesson;
+    const back = `<button class="btn ghost backlink" data-action="closeLesson">${icon("mdi:chevron-left")} Learn</button>`;
+    if (l.loading) return back + `<div class="empty">Loading…</div>`;
+    // A lesson that starts with its own "# Title" uses that instead of the file-name title.
+    const own = /^\s*#\s+/.test(l.markdown);
+    return back + `<article class="card article">${own ? "" : `<h1>${esc(l.title)}</h1>`}${mdToHtml(l.markdown, l.base_url)}</article>`;
   }
 
   /* ============================================================ WORKOUT */
@@ -910,13 +999,13 @@ class HealthAssistantPanel extends HTMLElement {
           <div><div class="muted small">Carbs</div><b>${r0(e.carbs_g)} g</b></div>
           <div><div class="muted small">Fat</div><b>${r0(e.fat_g)} g</b></div>
         </div>
-        <div class="muted small">${esc(e.formula || "")} · ${esc(e.activity_label || "")} (×${e.activity_multiplier ?? "–"}) · ${r0(e.steps_used ?? p.daily_steps)} steps/day${e.steps_source === "tracked" ? " (iPhone, 14-day avg)" : ""} · ${e.lifting?.active ? `~${r0(e.lifting.kcal_per_day)} kcal/day from lifting (${r1(e.lifting.sessions_per_week)} workouts/wk, 4-week avg)` : `${p.lifting_days} lifting day${p.lifting_days === 1 ? "" : "s"}/wk${e.lifting?.days_logged ? ` · switches to your logged workouts in ${Math.max(0, 14 - e.lifting.days_logged)} days` : ""}`}</div>
+        <div class="muted small">${esc(e.formula || "")} · ${esc(e.activity_label || "")} (×${e.activity_multiplier ?? "–"}) · ${r0(e.steps_used ?? p.daily_steps)} steps/day${e.steps_source === "tracked" ? " (phone, 14-day avg)" : ""} · ${e.lifting?.active ? `~${r0(e.lifting.kcal_per_day)} kcal/day from lifting (${r1(e.lifting.sessions_per_week)} workouts/wk, 4-week avg)` : `${p.lifting_days} lifting day${p.lifting_days === 1 ? "" : "s"}/wk${e.lifting?.days_logged ? ` · switches to your logged workouts in ${Math.max(0, 14 - e.lifting.days_logged)} days` : ""}`}</div>
         <div class="muted small">Protein: ${esc(e.protein_rule || "")} of body weight</div>
         ${manual ? `<div class="muted small">Calculated target: ${r0(e.target_auto)} kcal</div>` : e.daily_adjustment ? `<div class="muted small">${e.daily_adjustment < 0 ? "Deficit" : "Surplus"} of ${r0(Math.abs(e.daily_adjustment))} kcal/day for ${r1(u.wOut(p.goal_rate_kg_week, 2))} ${u.w}/week${e.target_floored ? " (raised to a safe minimum)" : ""}</div>` : ""}
       </div>
       <h3 class="section">Settings</h3>
       <div class="card list">
-        <button class="listrow" data-action="workoutSettings">${icon("mdi:timer-cog-outline")}<span>iPhone, rest timer & Apple Health</span><span class="muted">${fmtRest(p.rest_default_s ?? 120)}${p.live_activity_notify ? " · iPhone" : ""}</span>${icon("mdi:chevron-right", "muted")}</button>
+        <button class="listrow" data-action="workoutSettings">${icon("mdi:timer-cog-outline")}<span>Phone, rest timer & Apple Health</span><span class="muted">${fmtRest(p.rest_default_s ?? 120)}${p.live_activity_notify ? " · iPhone" : ""}</span>${icon("mdi:chevron-right", "muted")}</button>
         <button class="listrow" data-action="editProfile">${icon("mdi:account-edit-outline")}<span>Body & goal</span><span></span>${icon("mdi:chevron-right", "muted")}</button>
         ${this._hass?.user?.is_admin ? `<button class="listrow" data-action="linkUser">${icon("mdi:account-key-outline")}<span>Home Assistant user</span><span class="muted">${esc(this._linkedName())}</span>${icon("mdi:chevron-right", "muted")}</button>` : ""}
         <button class="listrow" data-action="importOpen">${icon("mdi:database-import-outline")}<span>Import workout history</span><span class="muted">Strong</span>${icon("mdi:chevron-right", "muted")}</button>
@@ -966,7 +1055,7 @@ class HealthAssistantPanel extends HTMLElement {
     const p = this._s.overview.profile;
     const cur = p.rest_default_s ?? 120;
     const targets = sh.targets;
-    return `<h2>iPhone, rest timer & Apple Health</h2>
+    return `<h2>Phone, rest timer & Apple Health</h2>
       <div class="form">
         <label>Default rest timer
           <select data-ws="rest_default_s">${REST_OPTIONS.map((v) => `<option value="${v}" ${v === cur ? "selected" : ""}>${fmtRest(v)}</option>`).join("")}</select></label>
@@ -983,7 +1072,8 @@ class HealthAssistantPanel extends HTMLElement {
         <h3>Steps</h3>
         <label>Step counter
           <select data-ws="steps_sensor"><option value="">Off — use the number from setup</option>${(sh.sensors || []).map((x) => `<option value="${esc(x.entity_id)}" ${x.entity_id === p.steps_sensor ? "selected" : ""}>${esc(x.name)}</option>`).join("")}</select></label>
-        <p class="muted small">Uses the Companion app's step sensor. Once 3 days are recorded, your 14-day average replaces the steps you entered at setup when working out maintenance calories. It counts steps your iPhone detects (not your Apple Watch). If it's missing, turn on the Steps sensor in the Companion app: Settings → Companion app → Sensors.</p>
+        <p class="muted small">Uses a step sensor from the Home Assistant Companion app, on iPhone or Android. Once 3 days are recorded, your 14-day average replaces the steps you entered at setup when working out maintenance calories.</p>
+        <p class="muted small"><b>iPhone:</b> pick Apple Health steps if you see it (includes your Apple Watch); the pedometer only counts steps the phone itself detects. <b>Android:</b> pick Health Connect daily steps if you see it (includes a watch or fitness app that syncs to Health Connect); the phone pedometer works too. Missing? Turn the sensor on in the Companion app: Settings → Companion app → Sensors (on Android, the Health Connect sensors also need Health Connect permission).</p>
         <h3>Apple Health</h3>
         <label class="inline"><input type="checkbox" data-ws="apple_health_export" ${p.apple_health_export !== false ? "checked" : ""} style="width:auto"> After a workout, offer to save it to Apple Health</label>
         <label>Shortcut name<input data-ws="apple_health_shortcut" value="${esc(p.apple_health_shortcut || "Health Assistant Log Workout")}"></label>
@@ -1038,7 +1128,7 @@ class HealthAssistantPanel extends HTMLElement {
         <label>Avg steps / day${stepsTracked ? `<input value="${r0(e.steps_used)} (tracked)" disabled>` : `<input data-p="steps" inputmode="numeric" value="${p.daily_steps}">`}</label>
         <label>Lifting days / week${lift.active ? `<input value="~${r0(lift.kcal_per_day)} kcal/day (tracked)" disabled>` : `<input data-p="lift" inputmode="numeric" value="${p.lifting_days}">`}</label>
       </div>
-      ${stepsTracked || lift.active ? `<p class="muted small">Tracked values come from your iPhone's step counter and your logged workouts, and update automatically.</p>` : ""}
+      ${stepsTracked || lift.active ? `<p class="muted small">Tracked values come from your phone's step counter and your logged workouts, and update automatically.</p>` : ""}
       <label>Goal pace (${u.w}/week)<input data-p="rate" inputmode="decimal" value="${u.wOut(p.goal_rate_kg_week, 2)}"></label>
       <p class="muted small">Current weight and body fat come from your latest logged health stats.</p>
       <button class="btn primary full" data-action="saveProfile">Save</button></div>`;
@@ -1370,7 +1460,7 @@ class HealthAssistantPanel extends HTMLElement {
         case "menu": this.dispatchEvent(new Event("hass-toggle-menu", { bubbles: true, composed: true })); break;
         case "tab":
           if (d.center && s.tab === "nutrition") { this._centerMenu(); break; }
-          s.tab = d.tab; localStorage.setItem("ha-health-tab", s.tab); s.sheets = [];
+          s.tab = d.tab; localStorage.setItem("ha-health-tab", s.tab); s.sheets = []; s.lesson = null;
           this._render(); this.shadowRoot.getElementById("content").scrollTop = 0;
           await this._loadTab(); this._render();
           break;
@@ -1381,6 +1471,14 @@ class HealthAssistantPanel extends HTMLElement {
         case "effort": { const sh = s.sheets.pop(); this._renderSheet(); sh.resolve(d.v === "" ? null : Number(d.v)); break; }
 
         /* history */
+        case "openLesson": {
+          s.lesson = { slug: d.slug, loading: true }; this._render();
+          this.shadowRoot.getElementById("content").scrollTop = 0;
+          try { s.lesson = await this.ws("lessons/get", { slug: d.slug }); }
+          catch (err) { s.lesson = null; this._toast(err.message || "Couldn't open that lesson", true); }
+          this._render(); this.shadowRoot.getElementById("content").scrollTop = 0; break;
+        }
+        case "closeLesson": s.lesson = null; this._render(); break;
         case "historyMode": s.historyMode = d.mode; this._render(); await this._loadTab(); this._render(); break;
         case "moreWorkouts": {
           const res = await this.ws("workout/list", { offset: s.workouts.length, limit: 20 });
@@ -1595,7 +1693,7 @@ class HealthAssistantPanel extends HTMLElement {
             <div class="egrid"><div><div class="muted small">Today</div><div class="big">${st.today != null ? r0(st.today) : "–"}</div></div>
             <div><div class="muted small">14-day avg</div><div class="big">${st.avg != null ? r0(st.avg) : "–"}</div></div>
             <div><div class="muted small">Used for calories</div><div class="big">${r0(st.used)}</div></div></div>
-            <p class="muted small">${st.sensor ? (st.source === "tracked" ? "Maintenance calories use your tracked average." : `Maintenance calories use the steps from setup until 3 days are tracked (${st.days} so far).`) : "No step counter connected. Pick one in Profile → iPhone, rest timer & Apple Health."}</p>
+            <p class="muted small">${st.sensor ? (st.source === "tracked" ? "Maintenance calories use your tracked average." : `Maintenance calories use the steps from setup until 3 days are tracked (${st.days} so far).`) : "No step counter connected. Pick one in Profile → Phone, rest timer & Apple Health."}</p>
             ${rows ? `<h3>Recent days</h3>${rows}` : ""}` });
           break;
         }
@@ -1903,6 +2001,23 @@ main { flex:1 1 auto; min-height:0; overflow-y:auto; -webkit-overflow-scrolling:
 .iconbtn.sm { width:32px; height:32px; }
 .iconbtn[disabled] { opacity:.3; }
 .linklike { text-align:left; }
+.lessons { display:flex; flex-direction:column; gap:8px; }
+.card.lesson { display:flex; align-items:center; gap:10px; text-align:left; width:100%; margin:0; cursor:pointer; color:inherit; font:inherit; }
+.card.lesson .lmain { flex:1; display:flex; flex-direction:column; gap:2px; }
+.backlink { padding-left:0; margin-bottom:6px; }
+.article { line-height:1.55; overflow-wrap:anywhere; }
+.article h1 { font-size:1.6rem; margin:.1em 0 .5em; line-height:1.2; } .article h2 { font-size:1.3rem; margin:1.2em 0 .4em; }
+.article h3 { font-size:1.1rem; margin:1.1em 0 .3em; } .article h4, .article h5, .article h6 { font-size:1rem; margin:1em 0 .3em; }
+.article p { margin:.6em 0; } .article ul, .article ol { margin:.6em 0; padding-left:1.4em; } .article li { margin:.25em 0; }
+.article li.task { list-style:none; margin-left:-1.2em; }
+.article img { max-width:100%; height:auto; border-radius:10px; display:block; margin:.8em auto; }
+.article a { color:var(--hp-accent); }
+.article blockquote { margin:.8em 0; padding:.2em 0 .2em 12px; border-left:3px solid var(--hp-accent); color:var(--hp-muted); }
+.article code { background:var(--hp-fill); padding:1px 5px; border-radius:5px; font-size:.9em; }
+.article pre { background:var(--hp-fill); padding:10px 12px; border-radius:10px; overflow-x:auto; } .article pre code { background:none; padding:0; }
+.article hr { border:0; border-top:1px solid var(--hp-line); margin:1.2em 0; }
+.article .mdtable { overflow-x:auto; margin:.8em 0; } .article table { border-collapse:collapse; width:100%; font-size:.92em; }
+.article th, .article td { border-bottom:1px solid var(--hp-line); padding:6px 8px; text-align:left; } .article th { font-weight:600; }
 .learnrow { display:flex; gap:10px; align-items:flex-start; padding:8px 0; }
 .learnrow + .learnrow { border-top:1px solid var(--hp-line); }
 .learnrow > ha-icon { flex:0 0 auto; margin-top:1px; color:#ff9500; }

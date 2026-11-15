@@ -35,7 +35,7 @@
         },
         "data_description": {
           "live_activity_notify": "Shows your rest countdown and next set on the Lock Screen and Dynamic Island, counts your daily steps, and offers to save finished workouts to Apple Health. You can change this later in Profile.",
-          "daily_steps": "Used until your iPhone has tracked a few days of steps. If you pick your phone below, its step counter is connected automatically."
+          "daily_steps": "Used until your phone has tracked a few days of steps (iPhone or Android). If you pick your phone below, its step counter is connected automatically."
         }
       },
       "summary": {

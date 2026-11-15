@@ -338,6 +338,21 @@ def _learn(hass, model, msg):
     return model.learn()
 
 
+@command("lessons/list")
+async def _lessons_list(hass, model, msg):
+    from .lessons import list_lessons
+    return await hass.async_add_executor_job(list_lessons)
+
+
+@command("lessons/get", {vol.Required("slug"): str})
+async def _lessons_get(hass, model, msg):
+    from .lessons import read_lesson
+    lesson = await hass.async_add_executor_job(read_lesson, msg["slug"])
+    if not lesson:
+        raise ValidationError("Lesson not found")
+    return lesson
+
+
 @command("steps/sensors")
 def _steps_sensors(hass, model, msg):
     from .iphone import step_sensors
