@@ -23,6 +23,54 @@ MAX_SAFE_DEFICIT = 600
 
 MIN_KCAL = {"male": 1500, "female": 1200}
 
+# Carbs per lb of body weight by how much you train (average training time per day).
+# (name, description, max hours/day for this level, low g/lb, high g/lb)
+CARB_LEVELS = (
+    ("Light", "Low intensity", 0.75, 1.5, 2.5),
+    ("Moderate", "Around 1 hour a day", 1.5, 2.5, 3.5),
+    ("High", "1–3 hours a day, moderate–high intensity", 3.5, 3.0, 5.0),
+    ("Very high", "4–5 hours a day, moderate–high intensity", float("inf"), 4.0, 6.0),
+)
+# Fat stays inside 20–35% of calories (the usual healthy range) while carbs are fitted.
+FAT_PCT_LOW, FAT_PCT_DEFAULT, FAT_PCT_HIGH = 0.20, 0.25, 0.35
+
+
+def carb_level(hours_per_week: float) -> tuple:
+    """Exercise level for the carb table from weekly training hours."""
+    per_day = max(0.0, hours_per_week) / 7
+    for level in CARB_LEVELS:
+        if per_day < level[2]:
+            return level
+    return CARB_LEVELS[-1]
+
+
+def split_macros(target: float, protein_g: float, carbs_low_g: float, carbs_high_g: float,
+                 fat_g: float | None = None, carbs_g: float | None = None) -> tuple[float, float, str]:
+    """Fat and carbs for a calorie target once protein is set.
+
+    Starts from fat at 25% of calories, then moves calories between fat and carbs (keeping
+    fat within 20–35%) to bring carbs inside the recommended range. A fixed (manual) fat or
+    carb number is kept and the other one takes the remaining calories.
+    Returns (fat_g, carbs_g, status) with status "in_range", "below_range" or "above_range".
+    """
+    left = max(0.0, target - protein_g * 4)
+    if fat_g is None and carbs_g is None:
+        fat_g = target * FAT_PCT_DEFAULT / 9
+        carbs_g = max(0.0, (left - fat_g * 9) / 4)
+        if carbs_g < carbs_low_g:  # take calories from fat, down to 20%
+            fat_g = max(target * FAT_PCT_LOW / 9, (left - carbs_low_g * 4) / 9)
+        elif carbs_g > carbs_high_g:  # give calories to fat, up to 35%
+            fat_g = min(target * FAT_PCT_HIGH / 9, (left - carbs_high_g * 4) / 9)
+        fat_g = max(0.0, min(fat_g, left / 9))
+        carbs_g = max(0.0, (left - fat_g * 9) / 4)
+    elif carbs_g is None:
+        carbs_g = max(0.0, (left - fat_g * 9) / 4)
+    elif fat_g is None:
+        fat_g = max(0.0, (left - carbs_g * 4) / 9)
+    status = ("below_range" if carbs_g < carbs_low_g - 0.5
+              else "above_range" if carbs_g > carbs_high_g + 0.5 else "in_range")
+    return fat_g, carbs_g, status
+
 
 def mifflin_st_jeor(weight_kg: float, height_cm: float, age: float, sex: str) -> float:
     """BMR via Mifflin-St Jeor (used when body fat is unknown)."""
@@ -53,6 +101,12 @@ class EnergyResult:
     protein_g: float
     fat_g: float
     carbs_g: float
+    carb_level: str = ""
+    carb_level_desc: str = ""
+    training_hours_day: float = 0.0
+    carbs_low_g: float = 0.0
+    carbs_high_g: float = 0.0
+    carbs_status: str = "in_range"
 
     def as_dict(self) -> dict:
         return {k: (round(v, 1) if isinstance(v, float) else v) for k, v in asdict(self).items()}
@@ -125,11 +179,14 @@ def calculate_energy(
     if floored:
         target = float(floor)
 
-    # Macros: protein per lb of body weight (more when lean); fat 25 %; carbs the rest.
+    # Macros: protein per lb of body weight (more when lean); carbs from the training table;
+    # fat fills the rest within 20–35% of calories (see split_macros).
+    weight_lb = weight_kg * LB_PER_KG
     per_lb = PROTEIN_G_PER_LB_LEAN if body_fat_pct and body_fat_pct < LEAN_BODY_FAT_PCT else PROTEIN_G_PER_LB
-    protein_g = weight_kg * LB_PER_KG * per_lb
-    fat_g = target * 0.25 / 9
-    carbs_g = max(0.0, (target - protein_g * 4 - fat_g * 9) / 4)
+    protein_g = weight_lb * per_lb
+    level = carb_level(hours)
+    carbs_low, carbs_high = weight_lb * level[3], weight_lb * level[4]
+    fat_g, carbs_g, carbs_status = split_macros(target, protein_g, carbs_low, carbs_high)
 
     return EnergyResult(
         formula=formula,
@@ -147,6 +204,12 @@ def calculate_energy(
         protein_g=protein_g,
         fat_g=fat_g,
         carbs_g=carbs_g,
+        carb_level=level[0],
+        carb_level_desc=level[1],
+        training_hours_day=hours / 7,
+        carbs_low_g=carbs_low,
+        carbs_high_g=carbs_high,
+        carbs_status=carbs_status,
     )
 
 

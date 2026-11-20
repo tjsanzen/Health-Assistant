@@ -1001,6 +1001,7 @@ class HealthAssistantPanel extends HTMLElement {
         </div>
         <div class="muted small">${esc(e.formula || "")} · ${esc(e.activity_label || "")} (×${e.activity_multiplier ?? "–"}) · ${r0(e.steps_used ?? p.daily_steps)} steps/day${e.steps_source === "tracked" ? " (phone, 14-day avg)" : ""} · ${e.lifting?.active ? `~${r0(e.lifting.kcal_per_day)} kcal/day from lifting (${r1(e.lifting.sessions_per_week)} workouts/wk, 4-week avg)` : `${p.lifting_days} lifting day${p.lifting_days === 1 ? "" : "s"}/wk${e.lifting?.days_logged ? ` · switches to your logged workouts in ${Math.max(0, 14 - e.lifting.days_logged)} days` : ""}`}</div>
         <div class="muted small">Protein: ${esc(e.protein_rule || "")} of body weight</div>
+        ${e.carbs_high_g ? `<div class="muted small">Carbs: ${esc(e.carb_level)} training (${esc(e.carb_level_desc).toLowerCase()}; ${r1(e.training_hours_day)} h/day average) → ${r0(e.carbs_low_g)}–${r0(e.carbs_high_g)} g a day${e.carbs_status === "below_range" ? ". Your calorie target is too low to fit the low end once protein and healthy fats are covered, so carbs are set as high as it allows." : e.carbs_status === "above_range" ? ". Your calorie target leaves extra calories even with carbs at the top of the range." : ""}</div>` : ""}
         ${manual ? `<div class="muted small">Calculated target: ${r0(e.target_auto)} kcal</div>` : e.daily_adjustment ? `<div class="muted small">${e.daily_adjustment < 0 ? "Deficit" : "Surplus"} of ${r0(Math.abs(e.daily_adjustment))} kcal/day for ${r1(u.wOut(p.goal_rate_kg_week, 2))} ${u.w}/week${e.target_floored ? " (raised to a safe minimum)" : ""}</div>` : ""}
       </div>
       <h3 class="section">Settings</h3>
@@ -1037,7 +1038,7 @@ class HealthAssistantPanel extends HTMLElement {
     const auto = e.macros_auto || {};
     const val = (k) => (p[k] ? p[k] : "");
     return `<h2>Daily targets</h2>
-      <p class="muted small">Leave a field blank to use the calculated value (shown in grey). If you only set calories, protein stays calculated, fat is 25% and carbs fill the rest.</p>
+      <p class="muted small">Leave a field blank to use the calculated value (shown in grey). If you only set calories, protein stays calculated and carbs are fitted to your training range, with fat between 20% and 35% of calories. If you fix carbs or fat, the other one takes whatever calories are left.</p>
       <div class="form">
         <label>Calories (kcal)<input data-t="calorie_target_override" inputmode="numeric" value="${val("calorie_target_override")}" placeholder="${r0(e.target_auto)}"></label>
         <div class="grid3">

@@ -50,6 +50,8 @@ Outdated guidelines say that most adult men need 2,500 calories per day, and adu
 
 When you set up this integration in Home Assistant, you entered your body details and goals; this should provide you with an estimate for your maintenance needs, as well as weight loss needs. It is generally not recommended to be in a deficit of more than 500 to 700 calories per day, especially for those trying to lose weight and retain or build muscle at the same time. 
 
+Based on the values you provided during setup, we calculated your maintenance calories to be roughly {mxcal} per day. So, if you wanted to lose one pound of fat per week, you'd aim for about {deficit} per day. Inversely, if you wanted to add weight, you'd add about 500 calories per day to your maintenance. 
+
 ### Protein: 
 
 While many gym bros and bodybuilders in the past have sworn by upwards of 200 grams of protein per day, modern research suggests that optimal protein intake for active individuals ranges between 0.7 to 1.0 grams of protein per pound of bodyweight per day (or about 1.6 to 2.2 grams per kilogram). For general health and basic needs, a baseline of around 0.6 grams per pound is a solid starting point—meaning an 180-pound individual would aim for roughly 108 grams per day. However, if you are actively lifting weights or in a calorie deficit, aiming for 0.8 to 1.0 grams per pound helps preserve lean muscle mass.
@@ -61,6 +63,8 @@ Proteins can be either complete or incomplete. Complete proteins contain all 9 e
 **Complete Protein Sources**: Eggs, dairy products, fish, meat, soy (tofu, edamame), hemp seeds, quinoa
 
 **Incomplete Protein Pairings**: Lentils & Rice, Brown Rice & Black Beans, Noodles & Peanut Sauce, Hummus & Pita
+
+Based on the values you provided during setup and your activity levels, we'd recommend aiming for {protein} per day.
 
 ### Fats:
 
@@ -74,6 +78,8 @@ Despite dietary fats having been villainized in the past, they are crucial for h
 
 **Trans Fats:** Artificial trans fats (partially hydrogenated oils) significantly increase heart disease risk and should be avoided entirely. 
 
+Based on the values you provided during setup, we'd recommend you aim for about {fats} of fats per day.
+
 ### Carbs:
 
 Carbohydrates are your body's primary and preferred energy source, breaking down into glucose to fuel your brain, organs, and intense physical exercise. Excess glucose is stored in limited amounts in your muscles and liver as **glycogen** for quick access later (and converted to fat reserves only when glycogen stores are full and total energy intake exceeds daily needs).
@@ -85,6 +91,16 @@ Rather than labeling carbs as strict "good" or "bad," it helps to understand how
 **Complex Carbs**: Oats, potatoes, sweet potatoes, whole grains, beans, lentils, corn, vegetables
 
 **Dietary Fiber** is a specialized form of carbohydrate. Unlike simple or complex starches, human digestive enzymes cannot fully break down fiber into glucose. As a result, fiber yields minimal net calories while playing a vital role in digestive health, blood sugar regulation, and satiety. Because of its importance, Health Assistant will track fiber in addition to your macros and calories. High-fiber foods include fruits, vegetables, whole grains, nuts, seeds, and legumes.
+
+Because carbohydrates are the main fuel for your body, here are the recommended amounts by how much exercise you do, per pound of body weight. 
+
+| Exercise | Description | Carbs per lb of bodyweight |
+| Light | Low intensity | 1.5g - 2.5g |
+| Moderate | Around 1 hour | 2.5g - 3.5g |
+| High | 1-3 hours, moderate-high intensity | 3g - 5g |
+| Very High | 4-5 hours, moderate-high intensity | 4g - 6g |
+
+Based on the values you provided, your recommended daily carbohydrate intake is {carbs}.
 
 ---
 

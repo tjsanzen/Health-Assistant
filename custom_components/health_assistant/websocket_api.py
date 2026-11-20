@@ -341,7 +341,10 @@ def _learn(hass, model, msg):
 @command("lessons/list")
 async def _lessons_list(hass, model, msg):
     from .lessons import list_lessons
-    return await hass.async_add_executor_job(list_lessons)
+    lessons = await hass.async_add_executor_job(list_lessons)
+    for l in lessons:
+        l["summary"] = model.fill_merge_tags(l["summary"])
+    return lessons
 
 
 @command("lessons/get", {vol.Required("slug"): str})
@@ -350,6 +353,7 @@ async def _lessons_get(hass, model, msg):
     lesson = await hass.async_add_executor_job(read_lesson, msg["slug"])
     if not lesson:
         raise ValidationError("Lesson not found")
+    lesson["markdown"] = model.fill_merge_tags(lesson["markdown"])
     return lesson
 
 

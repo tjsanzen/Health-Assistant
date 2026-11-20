@@ -8,12 +8,14 @@ This module has no Home Assistant imports so it can be unit tested directly.
 """
 from __future__ import annotations
 
+import re
 import copy
 import uuid
 from datetime import date, datetime, timedelta
 from typing import Any, Callable
 
-from .calculations import calculate_energy, estimated_1rm, workout_calories
+from .calculations import (FAT_PCT_HIGH, FAT_PCT_LOW, LB_PER_KG, calculate_energy, estimated_1rm,
+                           split_macros, workout_calories)
 from .const import MEALS, SET_TYPES, VITAL_TYPES
 
 RECENT_FOODS_MAX = 40
@@ -30,6 +32,8 @@ PROFILE_FIELDS = {
 }
 STEPS_AVG_DAYS = 14
 FIBER_G_PER_1000_KCAL = 14
+KCAL_DEFICIT_1LB_WEEK = 500  # ~3,500 kcal per lb of fat / 7 days
+PROTEIN_RANGE_TOP = 1.0      # g per lb, top of the {protein} range
 LEARN_MIN_DAYS = 5          # logged days (of the last 7) before recommendations appear
 LEARN_FIBER_SHARE = 0.75    # under 75% of the fiber goal
 LEARN_LOW_KCAL_GAP = 750    # this far under maintenance per day is too low
@@ -172,17 +176,19 @@ class HealthModel:
         out["target_manual"] = bool(p.get("calorie_target_override"))
         if out["target_manual"]:
             out["target"] = float(p["calorie_target_override"])
-            out["fat_g"] = round(out["target"] * 0.25 / 9, 1)
-            out["carbs_g"] = round(max(0.0, (out["target"] - out["protein_g"] * 4 - out["fat_g"] * 9) / 4), 1)
         manual_macros = []
         for key, field in (("protein_g", "protein_override_g"), ("fat_g", "fat_override_g"),
                            ("carbs_g", "carbs_override_g")):
             if p.get(field):
                 out[key] = float(p[field])
                 manual_macros.append(key)
-        if manual_macros and "carbs_g" not in manual_macros:
-            # Carbs fill whatever calories the fixed macros leave.
-            out["carbs_g"] = round(max(0.0, (out["target"] - out["protein_g"] * 4 - out["fat_g"] * 9) / 4), 1)
+        if out["target_manual"] or manual_macros:
+            # Refit fat and carbs around the manual numbers; a fixed one is kept as is.
+            fat, carbs, status = split_macros(
+                out["target"], out["protein_g"], out["carbs_low_g"], out["carbs_high_g"],
+                fat_g=out["fat_g"] if "fat_g" in manual_macros else None,
+                carbs_g=out["carbs_g"] if "carbs_g" in manual_macros else None)
+            out["fat_g"], out["carbs_g"], out["carbs_status"] = round(fat, 1), round(carbs, 1), status
         out["macros_manual"] = manual_macros
         # Fiber: 14 g per 1,000 kcal eaten (US Dietary Guidelines), a minimum to reach.
         out["fiber_g"] = round(out["target"] * FIBER_G_PER_1000_KCAL / 1000)
@@ -375,6 +381,43 @@ class HealthModel:
                 "fiber": energy["fiber_g"],
             } if energy else None,
         }
+
+    def merge_tags(self) -> dict[str, str]:
+        """Values for {tags} in Learn lessons, formatted with units for this profile."""
+        e = self.energy()
+        w = self.current_weight()
+        imperial = self.profile.get("units") != "metric"
+        dash = "—"
+
+        def n(x: float) -> str:
+            return f"{round(x):,}"
+
+        def rng(lo: float, hi: float, unit: str = "g") -> str:
+            lo, hi = round(lo), round(hi)
+            return f"{lo:,} {unit}" if lo == hi else f"{lo:,}–{hi:,} {unit}"
+
+        tags = {k: dash for k in ("weight", "mxcal", "deficit", "carbs", "protein", "fats", "fiber")}
+        if w:
+            tags["weight"] = f"{w * LB_PER_KG:,.1f} lb".replace(".0 lb", " lb") if imperial else f"{w:,.1f} kg".replace(".0 kg", " kg")
+        if e:
+            m = e["maintenance"]
+            weight_lb = (w or 0) * LB_PER_KG
+            tags["mxcal"] = f"{n(m)} kcal"
+            tags["deficit"] = f"{n(m - KCAL_DEFICIT_1LB_WEEK)} kcal"
+            tags["carbs"] = rng(e["carbs_low_g"], e["carbs_high_g"])
+            # Protein: this profile's rule (0.6 or 0.9 g/lb) up to 1.0 g/lb.
+            low_p = e["protein_g"] if "protein_g" not in e.get("macros_manual", []) else weight_lb * 0.6
+            tags["protein"] = rng(min(low_p, weight_lb * PROTEIN_RANGE_TOP), max(low_p, weight_lb * PROTEIN_RANGE_TOP))
+            # Fat: 20–35% of the calorie target.
+            tags["fats"] = rng(e["target"] * FAT_PCT_LOW / 9, e["target"] * FAT_PCT_HIGH / 9)
+            # Fiber: 14 g per 1,000 kcal, from the calorie target up to maintenance.
+            f1, f2 = (x * FIBER_G_PER_1000_KCAL / 1000 for x in (e["target"], m))
+            tags["fiber"] = rng(min(f1, f2), max(f1, f2))
+        return tags
+
+    def fill_merge_tags(self, text: str) -> str:
+        tags = self.merge_tags()
+        return re.sub(r"\{(" + "|".join(tags) + r")\}", lambda mt: tags[mt.group(1)], text)
 
     def learn(self) -> dict:
         """Learn tab: dietary recommendations from the last 7 finished days of food logs."""

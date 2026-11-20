@@ -76,7 +76,21 @@ Put Markdown files in `custom_components/health_assistant/data/lessons/`. Each o
 - Supported formatting: headings, bold, italic, code, lists, links, quotes, tables, images and dividers.
 - Edits show up the next time you open the Learn tab, without a restart.
 
-`example.md` shows the format. HACS replaces the integration folder when it updates, so keep a copy of your own lessons outside it.
+**Merge tags.** Lessons can include these tags, which are filled in with the reader's own numbers (examples are for a 176 lb profile lifting 3 days a week and losing 0.25 kg a week):
+
+| Tag | Shows | Example |
+| --- | --- | --- |
+| `{weight}` | Current weight | 176.4 lb |
+| `{mxcal}` | Maintenance calories | 2,473 kcal |
+| `{deficit}` | Maintenance minus 500 kcal (about 1 lb of fat loss a week) | 1,973 kcal |
+| `{carbs}` | Carb range for your training level | 265–441 g |
+| `{protein}` | Your protein rule (0.6 or 0.9 g/lb) up to 1.0 g/lb | 106–176 g |
+| `{fats}` | 20–35% of your calorie target | 49–85 g |
+| `{fiber}` | 14 g per 1,000 kcal, from your calorie target to maintenance | 31–35 g |
+
+Values include their unit, so write "about {mxcal} a day" rather than "{mxcal} calories". A tag shows "—" until there's enough data, for example before a weight is entered.
+
+`01_intro_to_nutrition.md` is a full example. HACS replaces the integration folder when it updates, so keep a copy of your own lessons outside it.
 
 ## More than one person
 
@@ -144,9 +158,19 @@ If a sensor is missing, turn it on in the Companion app under Settings → Compa
   The implied activity multiplier and label (Sedentary → Extremely active) are shown in the panel.
 - **Target**: maintenance ± (goal pace × 7,700 kcal/kg ÷ 7). The direction comes from target vs current weight; within 0.5 kg counts as maintain. The target never drops below 1,500 kcal (male) or 1,200 kcal (female).
 - **Lifting**: until you've been logging workouts for 2 weeks, lifting calories come from the "days per week" setup answer, at 1 hour each. After that, they're the active calories of your logged workouts (see below), averaged over the last 4 weeks. The setup answer is then locked, and the Profile shows your lifting kcal/day.
-- **Protein**: 0.6 g per lb of body weight, or 0.9 g/lb if your latest body fat is under 15%. Fat is 25% of calories and carbs are the rest.
+- **Protein**: 0.6 g per lb of body weight, or 0.9 g/lb if your latest body fat is under 15%.
+- **Carbs**: set by how much you train, per lb of body weight. Training time is your logged workouts (4-week average) once 2 weeks are logged; until then it's your lifting days × 1 hour.
+
+  | Exercise | Average training per day | Carbs per lb of body weight |
+  | --- | --- | --- |
+  | Light | Low intensity (under 45 min) | 1.5–2.5 g |
+  | Moderate | Around 1 hour (45 min–1.5 h) | 2.5–3.5 g |
+  | High | 1–3 hours, moderate–high intensity (1.5–3.5 h) | 3–5 g |
+  | Very high | 4–5 hours, moderate–high intensity (3.5 h+) | 4–6 g |
+
+- **Fat** fills the calories left after protein and carbs, kept between 20% and 35% of calories. It starts at 25%, then moves calories between fat and carbs to bring carbs inside the range. If your calorie target is too low to reach the bottom of the carb range with fat at 20%, carbs are set as high as the target allows, and the Profile tab says so.
 - **Deficit warning**: if a target works out to more than 600 kcal/day below maintenance, Health Assistant shows a warning you can override. This applies in setup, under Daily targets and under Body & goal.
-- **Manual targets** (Profile → Daily targets → Edit) replace any of these. With only calories set, protein stays calculated, fat is 25% and carbs fill the rest; with fixed protein/fat, carbs fill whatever calories are left.
+- **Manual targets** (Profile → Daily targets → Edit) replace any of these. With only calories set, protein stays calculated and fat and carbs are fitted as above. With fixed carbs or fat, the other one takes whatever calories are left.
 - **Nutrition averages** count only days you logged something, and leave out today because it isn't finished.
 - Current weight, body fat and height always come from your **latest logged health stat**, so the targets update as you log.
 - Records ignore warm-up sets. Estimated 1RM uses Epley: `w × (1 + reps/30)`.
