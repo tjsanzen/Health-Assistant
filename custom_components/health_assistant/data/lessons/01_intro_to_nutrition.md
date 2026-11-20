@@ -112,6 +112,8 @@ My recommended approach is this: for 1–2 weeks, don't try to make any drastic 
 
 Once you have a baseline for how much you are eating regularly—and have started to get a sense for what fills you up, what makes you feel energized, and what contains high calorie density—you can start making informed modifications to your diet. 
 
+The most important thing to remember is this: we should never be aiming for a specific number on a scale, a certain number of calories, or restricting ourselves from our favorite food. Rather, our goal should be full body holistic **health**. 
+
 ---
 
 ## Additional Learning: 
