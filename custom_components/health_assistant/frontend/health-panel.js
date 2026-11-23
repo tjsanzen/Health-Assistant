@@ -593,11 +593,11 @@ class HealthAssistantPanel extends HTMLElement {
       diet = L.recommendations.map((r) => `<div class="learnrow ${r.kind}">${icon(r.icon)}<div><b>${esc(r.title)}</b><div class="muted small">${esc(text(r))}</div></div></div>`).join("");
     }
     const c = L.cut_back;
-    const cut = c ? `<div class="card"><h3>${icon("mdi:food-off-outline")} Worth cutting back on?</h3>
+    const cut = c ? `<div class="card"><h3>${icon("mdi:food-off-outline")} Calories to Review:</h3>
         <div class="learnrow"><div><b>${esc(c.name)}</b>${c.brand ? ` <span class="muted small">${esc(c.brand)}</span>` : ""}
-        <div class="muted small">Your highest-calorie regular this week: logged ${c.count} times at about ${r0(c.kcal_each)} kcal each (${r0(c.kcal_week)} kcal${c.share != null ? `, ${c.share}% of what you ate` : ""}). Eating it less often, or a smaller portion, is an easy place to save calories.</div></div></div></div>` : "";
+        <div class="muted small">Your highest-calorie regular this week: logged ${c.count} times at about ${r0(c.kcal_each)} kcal each (${r0(c.kcal_week)} kcal${c.share != null ? `, ${c.share}% of what you ate` : ""}).</div></div></div></div>` : "";
     return head + `<div class="card"><h3>${icon("mdi:food-apple-outline")} Dietary recommendations</h3>${diet}
-        <div class="muted xsmall">Based on the last 7 days you logged food, not counting today.</div></div>${cut}${this._lessonsHtml()}`;
+      </div>${cut}${this._lessonsHtml()}`;
   }
 
   _lessonsHtml() {
@@ -861,14 +861,14 @@ class HealthAssistantPanel extends HTMLElement {
         <h3>Averages</h3>
         <table class="avg"><thead><tr><th></th>${W.map(([, l]) => `<th>${l}</th>`).join("")}</tr></thead>
         <tbody>${row("Calories", "kcal", "")}${row("Protein", "protein", " g")}${row("Carbs", "carbs", " g")}${row("Fat", "fat", " g")}${row("Fiber", "fiber", " g")}</tbody></table>
-        <div class="muted xsmall">Averages use days you logged food, not counting today.</div>
+        
       </div>
       <div class="card"><h3>Last 14 days</h3><div class="bars"><div class="plot">${tl}${bars}</div></div>
-        ${st.maintenance ? `<div class="blegend muted xsmall"><span><i class="sw"></i>Under target</span><span><i class="sw over"></i>Over target</span><span><i class="sw overm"></i>Over maintenance</span></div>` : ""}</div>
+        ${st.maintenance ? `` : ""}</div>
       ${fatCard}
       <div class="minitiles">
         <div class="card mini"><div class="muted small">Logging streak</div><div class="big">${st.streak}<small> day${st.streak === 1 ? "" : "s"}</small></div></div>
-        <div class="card mini"><div class="muted small">On target · 30 days</div><div class="big">${d30.on_target_days ?? "–"}<small> / ${d30.days_logged}</small></div><div class="muted xsmall">within ±10%</div></div>
+        <div class="card mini"><div class="muted small">On target</div><div class="big">${d30.on_target_days ?? "–"}<small> / ${d30.days_logged} days</small></div><div class="muted xsmall">within ±10%</div></div>
       </div>`;
   }
 
