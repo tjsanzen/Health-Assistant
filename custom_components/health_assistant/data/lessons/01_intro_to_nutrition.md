@@ -95,6 +95,7 @@ Rather than labeling carbs as strict "good" or "bad," it helps to understand how
 Because carbohydrates are the main fuel for your body, here are the recommended amounts by how much exercise you do, per pound of body weight. 
 
 | Exercise | Description | Carbs per lb of bodyweight |
+| ----------- | ----------- | ----------- |
 | Light | Low intensity | 1.5g - 2.5g |
 | Moderate | Around 1 hour | 2.5g - 3.5g |
 | High | 1-3 hours, moderate-high intensity | 3g - 5g |
