@@ -379,3 +379,19 @@ def test_learn_recommendations():
         m2.add_food({"name": "Salad", "kcal": maint - 900, "fiber": fiber})
     clock2.t = datetime(2026, 11, 9, 12)
     assert [r["kind"] for r in m2.learn()["recommendations"]] == ["kcal_low"]
+
+
+def test_custom_food_barcode():
+    m, _, _ = make()
+    f = m.add_custom_food({"name": "Protein bar", "kcal": 210, "protein": 20, "barcode": "049000028911"})
+    assert f["barcode"] == "0049000028911"
+    assert m.custom_food_by_barcode("0049000028911")["id"] == f["id"]
+    assert m.custom_food_by_barcode("49000028911") is not None  # missing leading zero still matches
+    assert m.custom_food_by_barcode("12345678") is None
+    try:
+        m.add_custom_food({"name": "x", "barcode": "12"})
+        raise AssertionError("short barcode accepted")
+    except model_mod.ValidationError:
+        pass
+    m.update_profile({"barcode_scanner": True})
+    assert m.profile["barcode_scanner"] is True

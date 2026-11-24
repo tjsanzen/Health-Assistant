@@ -199,7 +199,15 @@ async def _food_search(hass, model, msg):
 
 @command("food/barcode", {vol.Required("code"): str})
 async def _food_barcode(hass, model, msg):
-    return await hass.async_add_executor_job(hass.data[DOMAIN]["food_db"].barcode, msg["code"])
+    """Your own foods with a stored barcode come first, then the OpenNutrition database."""
+    from .food_db import normalize_barcode
+    code = normalize_barcode(msg["code"])
+    if not code:
+        return {"code": None, "food": None}
+    food = model.custom_food_by_barcode(code)
+    if not food:
+        food = await hass.async_add_executor_job(hass.data[DOMAIN]["food_db"].barcode, code)
+    return {"code": code, "food": food}
 
 
 @command("food/recent")

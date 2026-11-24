@@ -395,7 +395,7 @@ class HealthAssistantPanel extends HTMLElement {
       // (and nothing ticking otherwise) — the workout clock lives in the workout header.
       const rest = s.active?.rest;
       const label = isW && s.active ? (rest ? `Rest <span data-restnav>${fmtDur(Math.max(0, rest.ends_at - now()))}</span>` : "Workout") : t.label;
-      return `<button class="navbtn ${on ? "on" : ""} ${isW ? "center" : ""}" data-action="tab" data-tab="${t.id}" ${isW && bottom ? 'data-center="1"' : ""}>
+      return `<button class="navbtn ${on ? "on" : ""} ${isW ? "center" : ""}" data-action="tab" data-tab="${t.id}">
         <span class="navicon">${icon(isW && s.active ? "mdi:dumbbell" : t.icon)}</span><span class="navlabel">${label}</span></button>`;
     };
     const [learn, work, nut, prof] = TABS;
@@ -804,12 +804,20 @@ class HealthAssistantPanel extends HTMLElement {
     const meals = MEALS.map((m) => {
       const items = f.entries.filter((e) => e.meal === m);
       const kcal = items.reduce((a, e) => a + (e.kcal || 0), 0);
-      return `<div class="card meal"><div class="row between"><h3>${cap(m)}</h3><span class="muted">${r0(kcal)} kcal</span></div>
-        ${items.map((e) => `<button class="foodrow" data-action="editFood" data-id="${e.id}">
+      // Meals other than the one for this time of day start collapsed once they have food.
+      const open = items.length ? this._mealOpen(m) : true;
+      // The header "+" appears when the "Add food" button at the bottom is far away or hidden:
+      // more than one food logged, or the meal is collapsed.
+      const plus = items.length > 1 || (!open && items.length) ? `<button class="iconbtn mealplus" data-action="addFood" data-meal="${m}" aria-label="Add food to ${cap(m)}">${icon("mdi:plus")}</button>` : "";
+      const head = items.length
+        ? `<button class="mealtoggle" data-action="toggleMeal" data-meal="${m}" aria-expanded="${open}">
+            <h3>${cap(m)}</h3><span class="muted">· ${r0(kcal)} kcal${open ? "" : ` · ${items.length} item${items.length === 1 ? "" : "s"}`}</span>${icon(open ? "mdi:chevron-up" : "mdi:chevron-down", "muted")}</button>`
+        : `<div class="mealtoggle static"><h3>${cap(m)}</h3><span class="muted">· ${r0(kcal)} kcal</span></div>`;
+      return `<div class="card meal ${open ? "" : "collapsed"}"><div class="mealhead">${head}${plus}</div>
+        ${open ? items.map((e) => `<button class="foodrow" data-action="editFood" data-id="${e.id}">
           <div><div>${esc(e.name)}${e.brand ? ` <span class="muted small">${esc(e.brand)}</span>` : ""}</div>
           <div class="muted small">${this._amountText(e)} · P ${r0(e.protein)} · C ${r0(e.carbs)} · F ${r0(e.fat)}</div></div>
-          <span class="kcal">${r0(e.kcal)}</span></button>`).join("")}
-        <button class="btn ghost full" data-action="addFood" data-meal="${m}">${icon("mdi:plus")} Add food</button></div>`;
+          <span class="kcal">${r0(e.kcal)}</span></button>`).join("") + `<button class="btn ghost full" data-action="addFood" data-meal="${m}">${icon("mdi:plus")} Add food</button>` : ""}</div>`;
     }).join("");
     const left = `<div class="datenav"><button class="iconbtn" data-action="day" data-d="-1" aria-label="Previous day">${icon("mdi:chevron-left")}</button>
         <button class="linklike" data-action="dayToday"><b>${dayLabel}</b></button>
@@ -879,11 +887,20 @@ class HealthAssistantPanel extends HTMLElement {
     return `${r1(e.amount)} serving${e.amount === 1 ? "" : "s"}${e.grams ? ` (${r0(e.grams)} g)` : ""}`;
   }
 
+  /** Expanded? Remembered per day and meal once you tap; otherwise only today's current meal. */
+  _mealOpen(meal) {
+    const s = this._s, key = `${s.day}|${meal}`;
+    if (key in (s.mealOpen || {})) return s.mealOpen[key];
+    return s.day === localDate() && meal === mealForNow();
+  }
+
   _sheetAddFood(sh) {
     const tabs = ["search", "quick", "custom"].map((t) => `<button class="${sh.mode === t ? "on" : ""}" data-action="foodMode" data-mode="${t}">${{ search: "Search", quick: "Quick add", custom: "New food" }[t]}</button>`).join("");
     let body = "";
     if (sh.mode === "search") {
-      body = `<div class="searchbox">${icon("mdi:magnify")}<input id="foodq" type="search" placeholder="Search OpenNutrition Database" value="${esc(sh.query || "")}" data-input="foodSearch" autocomplete="off" enterkeyhint="search"></div>
+      const scan = this._s.overview?.profile?.barcode_scanner
+        ? `<button class="iconbtn scanbtn" data-action="scanFood" aria-label="Scan a barcode" title="Scan a barcode">${icon("mdi:barcode-scan")}</button>` : "";
+      body = `<div class="searchrow"><div class="searchbox">${icon("mdi:magnify")}<input id="foodq" type="search" placeholder="Search OpenNutrition Database" value="${esc(sh.query || "")}" data-input="foodSearch" autocomplete="off" enterkeyhint="search"></div>${scan}</div>
         <div id="foodresults">${this._foodResults(sh)}</div>`;
     } else if (sh.mode === "quick") {
       body = `<div class="form">
@@ -893,14 +910,21 @@ class HealthAssistantPanel extends HTMLElement {
         <label>Fiber (g)<input data-q="fiber" inputmode="decimal"></label></div>
         <button class="btn primary full" data-action="quickAdd">Add to ${cap(sh.meal)}</button></div>`;
     } else {
+      const c = sh.cform || {};
+      const v = (k, dflt = "") => `value="${esc(c[k] ?? dflt)}"`;
+      const barcode = this._s.overview?.profile?.barcode_scanner ? `<label>Store barcode (optional)
+          <div class="inrow"><input data-c="barcode" inputmode="numeric" placeholder="Digits under the barcode" ${v("barcode")}>
+          <button class="btn soft" data-action="scanForCustom">${icon("mdi:barcode-scan")} Scan</button></div></label>
+        <p class="muted xsmall">Scanning this package will find this food next time.</p>` : "";
       body = `<div class="form">
-        <label>Name<input data-c="name"></label><label>Brand (optional)<input data-c="brand"></label>
-        <div class="grid2"><label>Serving size<input data-c="serving_qty" inputmode="decimal" value="1"></label><label>Serving unit<input data-c="serving_unit" value="serving"></label></div>
-        <label>Serving weight in grams (optional)<input data-c="serving_g" inputmode="decimal"></label>
+        <label>Name<input data-c="name" ${v("name")}></label><label>Brand (optional)<input data-c="brand" ${v("brand")}></label>
+        <div class="grid2"><label>Serving size<input data-c="serving_qty" inputmode="decimal" ${v("serving_qty", "1")}></label><label>Serving unit<input data-c="serving_unit" ${v("serving_unit", "serving")}></label></div>
+        <label>Serving weight in grams (optional)<input data-c="serving_g" inputmode="decimal" ${v("serving_g")}></label>
         <p class="muted small">Nutrition per serving</p>
-        <div class="grid2"><label>Calories<input data-c="kcal" inputmode="decimal"></label><label>Protein (g)<input data-c="protein" inputmode="decimal"></label>
-        <label>Carbs (g)<input data-c="carbs" inputmode="decimal"></label><label>Fat (g)<input data-c="fat" inputmode="decimal"></label>
-        <label>Fiber (g)<input data-c="fiber" inputmode="decimal"></label></div>
+        <div class="grid2"><label>Calories<input data-c="kcal" inputmode="decimal" ${v("kcal")}></label><label>Protein (g)<input data-c="protein" inputmode="decimal" ${v("protein")}></label>
+        <label>Carbs (g)<input data-c="carbs" inputmode="decimal" ${v("carbs")}></label><label>Fat (g)<input data-c="fat" inputmode="decimal" ${v("fat")}></label>
+        <label>Fiber (g)<input data-c="fiber" inputmode="decimal" ${v("fiber")}></label></div>
+        ${barcode}
         <button class="btn primary full" data-action="createCustomFood">Save food</button></div>`;
     }
     return `<h2>Add to ${cap(sh.meal)}</h2><div class="seg">${tabs}</div>${body}`;
@@ -1006,6 +1030,7 @@ class HealthAssistantPanel extends HTMLElement {
       </div>
       <h3 class="section">Settings</h3>
       <div class="card list">
+        <button class="listrow" data-action="toggleBarcode">${icon("mdi:barcode-scan")}<span>Barcode scanner in Add food</span><span class="muted">${p.barcode_scanner ? "On" : "Off"}</span>${icon(p.barcode_scanner ? "mdi:toggle-switch" : "mdi:toggle-switch-off-outline", p.barcode_scanner ? "accent" : "muted")}</button>
         <button class="listrow" data-action="workoutSettings">${icon("mdi:timer-cog-outline")}<span>Phone, rest timer & Apple Health</span><span class="muted">${fmtRest(p.rest_default_s ?? 120)}${p.live_activity_notify ? " · iPhone" : ""}</span>${icon("mdi:chevron-right", "muted")}</button>
         <button class="listrow" data-action="editProfile">${icon("mdi:account-edit-outline")}<span>Body & goal</span><span></span>${icon("mdi:chevron-right", "muted")}</button>
         ${this._hass?.user?.is_admin ? `<button class="listrow" data-action="linkUser">${icon("mdi:account-key-outline")}<span>Home Assistant user</span><span class="muted">${esc(this._linkedName())}</span>${icon("mdi:chevron-right", "muted")}</button>` : ""}
@@ -1187,21 +1212,93 @@ class HealthAssistantPanel extends HTMLElement {
     if (this._sheet === sh && !sh.query) this._updateFoodResults();
   }
 
-  /** The phone's centre button on the Nutrition tab: you're usually there to log food. */
-  _centerMenu() {
-    const meal = mealForNow();
-    const go = async () => {
-      const s = this._s;
-      s.tab = "workout"; localStorage.setItem("ha-health-tab", s.tab); s.sheets = [];
-      this._render(); this.shadowRoot.getElementById("content").scrollTop = 0;
-      await this._loadTab(); this._render();
-    };
-    this._actionSheet("What would you like to do?", [
-      { label: "Log food", sub: `Adds to ${cap(meal)}`, icon: "mdi:food-apple-outline", run: () => this._openAddFood(meal) },
-      this._s.active
-        ? { label: "Back to workout", sub: this._s.active.name || "In progress", icon: "mdi:dumbbell", run: go }
-        : { label: "Start workout", icon: "mdi:dumbbell", run: go },
-    ]);
+  _customFormValues() {
+    const out = {};
+    this.shadowRoot.querySelectorAll("[data-c]").forEach((el) => (out[el.dataset.c] = el.value));
+    return out;
+  }
+
+  /* --- Barcodes. Best available, in order:
+     1. the Home Assistant app's own scanner (iPhone and Android Companion apps),
+     2. the browser's BarcodeDetector with the camera (Chrome on Android, Chrome/Edge on a Mac),
+     3. typing the number. Returns the digits, or null if cancelled. */
+  async _getBarcode() {
+    const ext = this._hass?.auth?.external;
+    if (ext?.config?.hasBarCodeScanner) {
+      const r = await this._scanInApp(ext);
+      return r === "manual" ? this._typeBarcode() : r;
+    }
+    if ("BarcodeDetector" in window && navigator.mediaDevices?.getUserMedia) return this._scanInPage();
+    return this._typeBarcode("This browser can't scan barcodes with the camera. The Home Assistant app on your phone can.");
+  }
+
+  _scanInApp(ext) {
+    return new Promise((resolve) => {
+      // The app delivers the result as a command to the frontend's single command handler.
+      // Wrap it for the length of the scan and hand everything else straight through.
+      const prev = ext._commandHandler;
+      const ack = (msg) => ext.fireMessage({ id: msg.id, type: "result", success: true, result: null });
+      const finish = (v) => { if (ext._commandHandler === handler) ext._commandHandler = prev; resolve(v); };
+      const handler = (msg) => {
+        if (msg.command === "bar_code/scan_result") {
+          ack(msg); ext.fireMessage({ type: "bar_code/close" });
+          finish(msg.payload?.rawValue || null); return true;
+        }
+        if (msg.command === "bar_code/aborted") {
+          ack(msg); finish(msg.payload?.reason === "alternative_options" ? "manual" : null); return true;
+        }
+        return prev ? prev(msg) : false;
+      };
+      ext._commandHandler = handler;
+      ext.fireMessage({ type: "bar_code/scan", payload: {
+        title: "Scan a barcode", description: "Point your camera at the barcode on the package",
+        alternative_option_label: "Type the number instead" } });
+    });
+  }
+
+  _scanInPage() {
+    return new Promise((resolve) => {
+      let stream = null, timer = null;
+      const stop = () => { clearTimeout(timer); stream?.getTracks().forEach((t) => t.stop()); stream = null; };
+      const sh = { kind: "scanner", resolve, stop, onClose: () => { stop(); if (!sh.done) resolve(null); } };
+      this._openSheet(sh);
+      (async () => {
+        try {
+          const formats = ["ean_13", "ean_8", "upc_a", "upc_e"];
+          const supported = (await BarcodeDetector.getSupportedFormats?.()) || formats;
+          const detector = new BarcodeDetector({ formats: formats.filter((f) => supported.includes(f)) });
+          stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" }, audio: false });
+          if (sh.done || this._sheet !== sh) { stop(); return; }
+          const video = this.shadowRoot.getElementById("scanvideo");
+          video.srcObject = stream; await video.play();
+          const tick = async () => {
+            if (sh.done || !stream) return;
+            try {
+              const found = await detector.detect(video);
+              if (found.length) {
+                sh.done = true; stop();
+                if (this._sheet === sh) { this._s.sheets.pop(); this._renderSheet(); }
+                try { navigator.vibrate?.(60); } catch (_) { /* no vibration */ }
+                resolve(found[0].rawValue); return;
+              }
+            } catch (_) { /* frame not ready */ }
+            timer = setTimeout(tick, 200);
+          };
+          tick();
+        } catch (err) {
+          sh.status = err?.name === "NotAllowedError" ? "Camera access was blocked. Allow it in your browser settings, or type the number." : "The camera couldn't start here. Type the number instead.";
+          if (this._sheet === sh) this._renderSheet();
+        }
+      })();
+    });
+  }
+
+  _typeBarcode(note = "") {
+    return new Promise((resolve) => {
+      const sh = { kind: "barcodeEntry", note, resolve, onClose: () => { if (!sh.done) resolve(null); } };
+      this._openSheet(sh);
+      setTimeout(() => this.shadowRoot.querySelector("[data-barcode]")?.focus(), 50);
+    });
   }
 
   _actionSheet(title, items, subtitle = "") {
@@ -1234,6 +1331,14 @@ class HealthAssistantPanel extends HTMLElement {
       case "html": body = sh.html; break;
       case "menu": body = this._sheetMenu(sh); break;
       case "addFood": body = this._sheetAddFood(sh); break;
+      case "scanner": body = `<h2>${icon("mdi:barcode-scan")} Scan a barcode</h2>
+        <div class="scanview"><video id="scanvideo" playsinline muted autoplay></video><div class="scanframe"></div></div>
+        <p class="muted small center">${esc(sh.status || "Point your camera at the barcode on the package.")}</p>
+        <button class="btn ghost full" data-action="barcodeManual">Type the number instead</button>`; break;
+      case "barcodeEntry": body = `<h2>${icon("mdi:barcode")} Enter a barcode</h2>
+        <div class="form"><label>Barcode number<input data-barcode inputmode="numeric" autocomplete="off" data-enter="barcodeSubmit" placeholder="e.g. 049000028911"></label>
+        ${sh.note ? `<p class="muted small">${esc(sh.note)}</p>` : ""}
+        <button class="btn primary full" data-action="barcodeSubmit">Look up</button></div>`; break;
       case "portion": body = this._sheetPortion(sh); break;
       case "vital": body = this._sheetVital(sh); break;
       case "profile": body = this._sheetProfile(); break;
@@ -1460,7 +1565,6 @@ class HealthAssistantPanel extends HTMLElement {
       switch (action) {
         case "menu": this.dispatchEvent(new Event("hass-toggle-menu", { bubbles: true, composed: true })); break;
         case "tab":
-          if (d.center && s.tab === "nutrition") { this._centerMenu(); break; }
           s.tab = d.tab; localStorage.setItem("ha-health-tab", s.tab); s.sheets = []; s.lesson = null;
           this._render(); this.shadowRoot.getElementById("content").scrollTop = 0;
           await this._loadTab(); this._render();
@@ -1605,6 +1709,48 @@ class HealthAssistantPanel extends HTMLElement {
         case "dayToday": s.day = localDate(); s.food = await this.ws("food/day", { date: s.day }); this._render(); break;
         case "addFood": await this._openAddFood(d.meal); break;
         case "foodMode": this._sheet.mode = d.mode; this._renderSheet(); break;
+        case "toggleMeal": {
+          s.mealOpen = s.mealOpen || {};
+          s.mealOpen[`${s.day}|${d.meal}`] = !this._mealOpen(d.meal);
+          this._render(); break;
+        }
+        case "toggleBarcode": {
+          const on = !this._s.overview.profile.barcode_scanner;
+          await this.ws("profile/update", { changes: { barcode_scanner: on } });
+          await this._refreshOverview(); this._render();
+          this._toast(on ? "Barcode scanner on — look for it in Add food" : "Barcode scanner off"); break;
+        }
+        case "scanFood": {
+          const sh = this._sheet;
+          const code = await this._getBarcode();
+          if (!code) break;
+          const res = await this.ws("food/barcode", { code });
+          if (!res.code) { this._toast("That barcode doesn't look right — try typing it", true); break; }
+          if (res.food) {
+            this._openSheet({ kind: "portion", food: res.food, amount: 1, unit: "serving", meal: sh.meal });
+          } else {
+            sh.mode = "custom"; sh.cform = { barcode: res.code }; this._renderSheet();
+            this._toast("Not in the database yet — add it as a new food and scanning will find it next time");
+          }
+          break;
+        }
+        case "scanForCustom": {
+          const sh = this._sheet;
+          sh.cform = this._customFormValues();
+          const code = await this._getBarcode();
+          if (code) sh.cform.barcode = code;
+          if (this._sheet === sh) this._renderSheet();
+          break;
+        }
+        case "barcodeManual": {
+          const sh = this._sheet; sh.done = true; s.sheets.pop(); this._renderSheet();
+          sh.stop?.(); sh.resolve(await this._typeBarcode()); break;
+        }
+        case "barcodeSubmit": {
+          const v = this.shadowRoot.querySelector("[data-barcode]")?.value || "";
+          if (!/\d{6,}/.test(v.replace(/\D/g, ""))) { this._toast("Enter the digits under the barcode", true); break; }
+          const sh = this._sheet; sh.done = true; s.sheets.pop(); this._renderSheet(); sh.resolve(v.replace(/\D/g, "")); break;
+        }
         case "pickFood": {
           const sh = this._sheet;
           const pool = { recent: sh.recent, custom: sh.custom, rcustom: sh.results?.custom, results: sh.results?.results }[d.src];
@@ -1654,8 +1800,9 @@ class HealthAssistantPanel extends HTMLElement {
           const food = await this.ws("food/custom/create", { food: {
             name: get("name"), brand: get("brand") || null, serving_qty: num(get("serving_qty")) || 1, serving_unit: get("serving_unit") || "serving",
             serving_g: num(get("serving_g")), kcal: num(get("kcal")) || 0, protein: num(get("protein")) || 0, carbs: num(get("carbs")) || 0, fat: num(get("fat")) || 0, fiber: num(get("fiber")) || 0,
+            barcode: (get("barcode") || "").trim() || null,
           } });
-          const sh = this._sheet; sh.custom = [food, ...(sh.custom || [])]; sh.mode = "search";
+          const sh = this._sheet; sh.custom = [food, ...(sh.custom || [])]; sh.mode = "search"; sh.cform = null;
           this._openSheet({ kind: "portion", food, amount: 1, unit: "serving", meal: sh.meal });
           break;
         }
@@ -2100,6 +2247,19 @@ main { flex:1 1 auto; min-height:0; overflow-y:auto; -webkit-overflow-scrolling:
 .fill { height:100%; border-radius:4px; background:var(--hp-accent); transition:width .4s; }
 .fill.p { background:#ff3b30; } .fill.c { background:#ff9500; } .fill.f { background:#af52de; } .fill.fb { background:#34c759; }
 .meal h3 { margin:0; }
+.mealhead { display:flex; align-items:center; justify-content:space-between; gap:8px; }
+.mealtoggle { display:flex; align-items:center; gap:6px; flex:1; min-width:0; text-align:left; color:inherit; font:inherit; padding:2px 0; background:none; border:0; cursor:pointer; }
+.mealtoggle.static { cursor:default; }
+.mealtoggle ha-icon { --mdc-icon-size:20px; margin-left:auto; }
+.mealplus { color:var(--hp-accent); flex:0 0 auto; }
+.mealplus ha-icon { --mdc-icon-size:24px; }
+.meal.collapsed { padding-top:10px; padding-bottom:10px; }
+.searchrow { display:flex; gap:8px; align-items:center; margin-bottom:8px; } .searchrow .searchbox { flex:1; margin:0; }
+.scanbtn { color:var(--hp-accent); flex:0 0 auto; }
+.inrow { display:flex; gap:8px; align-items:stretch; } .inrow input { flex:1; min-width:0; } .inrow .btn { flex:0 0 auto; white-space:nowrap; }
+.scanview { position:relative; border-radius:14px; overflow:hidden; background:#000; aspect-ratio:4/3; margin:8px 0; }
+.scanview video { width:100%; height:100%; object-fit:cover; display:block; }
+.scanframe { position:absolute; left:12%; right:12%; top:32%; bottom:32%; border:2px solid rgba(255,255,255,.85); border-radius:10px; box-shadow:0 0 0 999px rgba(0,0,0,.25); }
 .foodrow { display:flex; width:100%; justify-content:space-between; align-items:center; gap:10px; text-align:left; padding:10px 2px; border-top:1px solid var(--hp-line); }
 .foodrow > div { min-width:0; } .foodrow .kcal { font-weight:600; white-space:nowrap; font-variant-numeric:tabular-nums; }
 .avg { width:100%; border-collapse:collapse; font-variant-numeric:tabular-nums; }

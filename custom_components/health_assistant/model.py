@@ -27,6 +27,8 @@ PROFILE_FIELDS = {
     "calorie_target_override", "protein_override_g", "carbs_override_g", "fat_override_g",
     # Workout settings
     "rest_default_s", "live_activity_notify", "rest_sound",
+    # Nutrition: barcode scanner in Add food (off until turned on in Profile)
+    "barcode_scanner",
     # iPhone: step sensor from the Companion app, and Apple Health export
     "steps_sensor", "apple_health_export", "apple_health_shortcut",
 }
@@ -541,6 +543,12 @@ class HealthModel:
             "per_serving": {k: float(food.get(k) or 0) for k in ("kcal", "protein", "fat", "carbs", "fiber")},
             "custom": True,
         }
+        if food.get("barcode"):
+            from .food_db import normalize_barcode
+            code = normalize_barcode(food["barcode"])
+            if not code:
+                raise ValidationError("That barcode doesn't look right — it should be 8 to 14 digits")
+            item["barcode"] = code
         self.data["custom_foods"].append(item)
         self._changed()
         return item
@@ -548,6 +556,14 @@ class HealthModel:
     def delete_custom_food(self, food_id: str) -> None:
         self.data["custom_foods"] = [f for f in self.data["custom_foods"] if f["id"] != food_id]
         self._changed()
+
+    def custom_food_by_barcode(self, code: str) -> dict | None:
+        """Newest custom food stored with this barcode."""
+        from .food_db import normalize_barcode
+        code = normalize_barcode(code)
+        if not code:
+            return None
+        return next((f for f in reversed(self.data["custom_foods"]) if f.get("barcode") == code), None)
 
     def search_custom_foods(self, query: str) -> list[dict]:
         q = query.lower().strip()

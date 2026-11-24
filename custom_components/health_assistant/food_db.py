@@ -15,6 +15,17 @@ NUTRIENT_KEYS = ("kcal", "protein", "fat", "carbs", "fiber", "sugar", "sodium", 
 TOKEN_RE = re.compile(r"[\w']+", re.UNICODE)
 
 
+
+def normalize_barcode(code: str | None) -> str | None:
+    """Digits of a UPC/EAN barcode as a 13-digit EAN (how the food database stores them).
+    UPC-A (12), EAN-8 and EAN-13 are zero-padded; a 14-digit GTIN with a leading 0 is trimmed."""
+    digits = "".join(ch for ch in str(code or "") if ch.isdigit())
+    if len(digits) == 14 and digits.startswith("0"):
+        digits = digits[1:]
+    if not 6 <= len(digits) <= 13:
+        return None
+    return digits.zfill(13)
+
 class FoodDatabase:
     def __init__(self, paths: list[str]) -> None:
         self.path = next((p for p in paths if os.path.isfile(p)), None)
@@ -66,7 +77,9 @@ class FoodDatabase:
     def barcode(self, ean: str) -> dict | None:
         if not self.available:
             return None
-        ean = ean.strip().zfill(13)
+        ean = normalize_barcode(ean)
+        if not ean:
+            return None
         row = self._conn().execute(f"SELECT {COLUMNS} FROM foods WHERE ean = ?", (ean,)).fetchone()
         return self._row(row) if row else None
 
