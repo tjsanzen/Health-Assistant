@@ -48,7 +48,7 @@ Workout, Nutrition, and Health Datapoint logging inside of Home Assistant. Track
 
 ## Dashboard cards
 
-The integration loads three cards on every dashboard, so there's no resource to add. Find them under **Add card**, or add them in YAML:
+The integration loads these cards on every dashboard, so there's no resource to add. Find them under **Add card**, or add them in YAML:
 
 ```yaml
 type: custom:health-assistant-lift-calendar   # this month, days you lifted circled in green (‹ › to change month)
@@ -58,10 +58,25 @@ type: custom:health-assistant-calorie-gauge   # today's calories as a speedomete
 type: custom:health-assistant-log-meal        # a button that opens a "Log a meal" dialog
 name: Log meal                                # optional
 icon: mdi:silverware-fork-knife               # optional
+---
+type: custom:health-assistant-nutrition-today     # today's calorie ring with protein, carbs, fat and fiber bars
+---
+type: custom:health-assistant-nutrition-averages  # average calories and macros over 7 days, 30 days and all time
+---
+type: custom:health-assistant-calorie-history     # last 14 days against target and maintenance
+show_fat_burned: true                             # optional, the "estimated fat burned this week" box
+show_streak: true                                 # optional, the streak and on-target tiles
+---
+type: custom:health-assistant-exercise-progress   # one exercise over time
+exercise_name: bench_press                        # id or name; the closest match is used
+time: 30                                          # days, or all_time (the default)
+metric: e1rm                                      # optional: e1rm, weight, volume, reps, duration_s, distance_m
 ```
 
 - **Profile:** every card takes an optional `profile: Anna` (a profile name or id). By default it uses the profile linked to whoever is signed in.
-- **Title:** the calendar and gauge also take an optional `title:`.
+- **Title:** every card except the log-meal button takes an optional `title:`.
+- **Exercise progress:** one point per workout, from your best working set. Warm-ups don't count. The default metric is estimated 1RM for weighted lifts, reps for bodyweight exercises, and time or distance for cardio. The highest point is gold, and the header shows your latest value and the change since the first point in range. `exercise_name` accepts an id (`bench_press`), a name (`Bench Press`) or something close: `tricep_pushdown_machine` finds Tricep Pushdown.
+- **Nutrition cards:** the same views as the Nutrition tab's sidebar. They update when food is logged anywhere.
 - **Gauge colours:** blue up to 90% of your target, green within ±10%, red when you're over.
 - **Log a meal dialog:** OpenNutrition search, recent foods and Quick add, logged to the meal you pick.
 

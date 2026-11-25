@@ -395,3 +395,18 @@ def test_custom_food_barcode():
         pass
     m.update_profile({"barcode_scanner": True})
     assert m.profile["barcode_scanner"] is True
+
+
+def test_exercise_progress():
+    m, clock, _ = make()
+    clock.t = datetime(2026, 11, 9, 12)
+    for back, w in ((60, 80), (20, 85), (5, 90)):
+        m.data["workouts"].append({"id": f"w{back}", "name": "Push", "started_at": (clock.t - timedelta(days=back)).isoformat(),
+            "exercises": [{"exercise_id": "bench_press", "sets": [
+                {"type": "warmup", "weight": 40, "reps": 10}, {"type": "working", "weight": w, "reps": 5},
+                {"type": "working", "weight": w - 5, "reps": 8}]}]})
+    allp = m.exercise_progress("Bench Press")
+    assert allp["exercise"]["id"] == "bench_press" and len(allp["points"]) == 3
+    assert allp["points"][0]["weight"] == 80 and allp["points"][-1]["sets"] == 2  # warm-up not counted
+    assert len(m.exercise_progress("bench_press", 30)["points"]) == 2
+    assert m.exercise_progress("tricep_pushdown_machine")["exercise"]["id"] == "tricep_pushdown"

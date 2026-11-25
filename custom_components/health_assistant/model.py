@@ -528,6 +528,7 @@ class HealthModel:
             "d7": window(7), "d30": window(30), "all": window(None),
             "first_day": first, "streak": streak, "series": series, "target": target,
             "maintenance": round(maintenance) if maintenance else None, "fat_week": fat_week,
+            "units": self.profile.get("units", "imperial"),
         }
 
     def add_custom_food(self, food: dict) -> dict:
@@ -612,6 +613,60 @@ class HealthModel:
 
     def exercise(self, exercise_id: str) -> dict | None:
         return next((e for e in self.exercises() if e["id"] == exercise_id), None)
+
+    def find_exercise(self, query: str) -> dict | None:
+        """An exercise by id or name, forgivingly: "bench_press", "Bench Press" and
+        "tricep_pushdown_machine" (closest name: Tricep Pushdown) all work. Exercises you've
+        actually logged win close calls, so a card shows your data rather than a near miss."""
+        import difflib
+        norm = lambda x: re.sub(r"[\s_\-]+", " ", str(x or "").lower()).strip()
+        q = norm(query)
+        if not q:
+            return None
+        exs = self.exercises()
+        for e in exs:
+            if norm(e["id"]) == q or norm(e["name"]) == q:
+                return e
+        logged = {ex["exercise_id"] for w in self.data["workouts"] for ex in w["exercises"]}
+        names = {norm(e["name"]): e for e in exs}
+        names.update({norm(e["id"]): e for e in exs})
+        # Every word of an exercise's name inside the query (or the other way round).
+        qw = set(q.split())
+        contained = [e for k, e in names.items() if set(k.split()) <= qw or qw <= set(k.split())]
+        if contained:
+            return max(contained, key=lambda e: (e["id"] in logged, len(norm(e["name"]))))
+        close = difflib.get_close_matches(q, list(names), n=5, cutoff=0.6)
+        if close:
+            return max((names[c] for c in close), key=lambda e: (e["id"] in logged, difflib.SequenceMatcher(None, q, norm(e["name"])).ratio()))
+        return None
+
+    def exercise_progress(self, query: str, days: int | None = None) -> dict:
+        """Per-workout bests for one exercise, oldest first, for the progress card."""
+        ex = self.find_exercise(query)
+        if not ex:
+            raise ValidationError(f"No exercise matches \"{query}\"")
+        since = (self._now() - timedelta(days=days)).isoformat()[:10] if days else None
+        points = []
+        for w in sorted(self.data["workouts"], key=lambda w: w["started_at"]):
+            if since and w["started_at"][:10] < since:
+                continue
+            for e in w["exercises"]:
+                if e["exercise_id"] != ex["id"]:
+                    continue
+                sets = [s for s in e["sets"] if s.get("type") in COUNTED_SET_TYPES]
+                if not sets:
+                    continue
+                points.append({
+                    "date": w["started_at"], "workout_id": w["id"], "sets": len(sets),
+                    "e1rm": round(max((estimated_1rm(s.get("weight") or 0, s.get("reps") or 0) for s in sets), default=0), 2),
+                    "weight": max((s.get("weight") or 0 for s in sets), default=0),
+                    "reps": max((s.get("reps") or 0 for s in sets), default=0),
+                    "volume": round(sum((s.get("weight") or 0) * (s.get("reps") or 0) for s in sets), 1),
+                    "duration_s": max((s.get("duration_s") or 0 for s in sets), default=0),
+                    "distance_m": max((s.get("distance_m") or 0 for s in sets), default=0),
+                })
+        return {"exercise": {"id": ex["id"], "name": ex["name"], "kind": ex.get("kind", "weight_reps")},
+                "days": days, "units": self.profile.get("units", "imperial"), "points": points}
 
     def add_exercise(self, ex: dict) -> dict:
         name = (ex.get("name") or "").strip()

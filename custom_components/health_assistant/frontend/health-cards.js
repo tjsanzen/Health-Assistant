@@ -3,6 +3,13 @@
  *   type: custom:health-assistant-lift-calendar   → month calendar, lifting days circled in green
  *   type: custom:health-assistant-calorie-gauge   → today's calories as a speedometer
  *   type: custom:health-assistant-log-meal        → button that opens a "log a meal" dialog
+ *   type: custom:health-assistant-nutrition-today → calorie ring + macro bars for today
+ *   type: custom:health-assistant-nutrition-averages → 7-day / 30-day / all-time averages
+ *   type: custom:health-assistant-calorie-history → last 14 days of calories (show_fat_burned, show_streak)
+ *   type: custom:health-assistant-exercise-progress → one exercise over time
+ *       exercise_name: bench_press    (id or name; the closest match is used)
+ *       time: 30                      (days, or all_time — the default)
+ *       metric: e1rm                  (optional: e1rm, weight, volume, reps, duration_s, distance_m)
  *
  * Optional on every card:  profile: Anna   (profile name or id; default = your linked profile)
  * Loaded automatically on every dashboard by the integration — no resource to add.
@@ -444,15 +451,284 @@ class LogMealDialog extends HTMLElement {
   }
 }
 
+/* ==================================================== shared nutrition bits */
+const LB = 2.20462262;
+/** Refresh a card when the "Calories today" sensor changes (food logged anywhere). */
+function watchCalories(card, h) {
+  if (!card._watch) card._watch = Object.keys(h.states).filter((id) => id.startsWith("sensor.") && id.endsWith("_calories_today"));
+  const sig = card._watch.map((id) => h.states[id]?.state).join("|");
+  if (card._sig !== undefined && sig !== card._sig) card.refresh();
+  card._sig = sig;
+}
+const NUTRI_CSS = `
+  ha-card { padding: 12px 14px 14px; }
+  .title { font-weight: 600; margin-bottom: 8px; }
+  .big { font-size: 1.45rem; font-weight: 650; line-height: 1.15; font-variant-numeric: tabular-nums; }
+  .big small { font-size: .85rem; font-weight: 400; color: var(--hc-muted); }
+  .small { font-size: .85rem; } .xsmall { font-size: .75rem; }
+  .row { display: flex; align-items: center; gap: 8px; } .between { justify-content: space-between; }
+`;
+
+/* ============================================ nutrition: calories + macros */
+class NutritionTodayCard extends HACard {
+  static getStubConfig() { return {}; }
+  get refreshEvery() { return 60 * 1000; }
+  getCardSize() { return 3; }
+  getGridOptions() { return { columns: 6, rows: 3, min_columns: 6, min_rows: 2 }; }
+  hassChanged(h) { watchCalories(this, h); }
+
+  async refresh() {
+    try { this._day = await this.ws("food/day", { date: localDate() }); this._error = null; }
+    catch (e) { this._error = e.message || String(e); }
+    this.render();
+  }
+
+  render() {
+    const d = this._day || {};
+    const t = d.totals || {}, mt = d.macro_targets || {};
+    const target = d.target || 0, eaten = t.kcal || 0, left = target - eaten;
+    const R = 52, C = 2 * Math.PI * R, pct = target ? Math.min(1, eaten / target) : 0;
+    const macro = (k, label, color) => {
+      const goal = mt[k] || 0, val = t[k] || 0;
+      return `<div class="macro"><div class="row between small"><span>${label}</span><span class="muted">${r0(val)} / ${r0(goal)} g</span></div>
+        <div class="bar"><div class="fill" style="background:${color};width:${goal ? Math.min(100, (val / goal) * 100) : 0}%"></div></div></div>`;
+    };
+    this.shadowRoot.innerHTML = `<style>${BASE_CSS}${NUTRI_CSS}
+        .summary { display:flex; gap:16px; align-items:center; }
+        .ringwrap { position:relative; width:118px; height:118px; flex:0 0 auto; }
+        svg { width:100%; height:100%; }
+        .ringbg { fill:none; stroke:var(--hc-fill); stroke-width:11; }
+        .ringfg { fill:none; stroke:var(--hc-accent); stroke-width:11; stroke-linecap:round; transition:stroke-dashoffset .4s; } .ringfg.over { stroke:#ff3b30; }
+        .ringtext { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; }
+        .sumright { flex:1; display:flex; flex-direction:column; gap:5px; min-width:0; }
+        .bar { height:7px; background:var(--hc-fill); border-radius:4px; overflow:hidden; margin:3px 0; }
+        .fill { height:100%; border-radius:4px; transition:width .4s; }
+      </style>
+      <ha-card>
+        ${this._config.title !== "" ? `<div class="title">${esc(this._config.title || "Today")}</div>` : ""}
+        ${this._error ? `<div class="err">${esc(this._error)}</div>` : `<div class="summary">
+          <div class="ringwrap"><svg viewBox="0 0 120 120"><circle cx="60" cy="60" r="${R}" class="ringbg"/>
+            <circle cx="60" cy="60" r="${R}" class="ringfg ${target && eaten > target ? "over" : ""}" stroke-dasharray="${C}" stroke-dashoffset="${C * (1 - pct)}" transform="rotate(-90 60 60)"/></svg>
+            <div class="ringtext"><div class="big">${r0(Math.abs(left))}</div><div class="muted small">${left >= 0 ? "kcal left" : "kcal over"}</div></div></div>
+          <div class="sumright">
+            <div class="row between small"><span>Eaten</span><b>${r0(eaten)}</b></div>
+            <div class="row between small"><span>Target</span><b>${r0(target)}</b></div>
+            ${macro("protein", "Protein", "#ff3b30")}${macro("carbs", "Carbs", "#ff9500")}${macro("fat", "Fat", "#af52de")}${macro("fiber", "Fiber", "#34c759")}
+          </div></div>`}
+      </ha-card>`;
+  }
+}
+
+/* ======================================================= nutrition: averages */
+class NutritionAveragesCard extends HACard {
+  static getStubConfig() { return {}; }
+  get refreshEvery() { return 10 * 60 * 1000; }
+  getCardSize() { return 3; }
+  getGridOptions() { return { columns: 6, rows: 3, min_columns: 6, min_rows: 3 }; }
+
+  async refresh() {
+    try { this._st = await this.ws("food/stats"); this._error = null; }
+    catch (e) { this._error = e.message || String(e); }
+    this.render();
+  }
+
+  render() {
+    const st = this._st;
+    const W = st ? [["d7", "7 days"], ["d30", "30 days"], ["all", `All (${st.all.days_logged}d)`]] : [];
+    const row = (label, key, unit) => `<tr><th>${label}</th>${W.map(([k]) => { const v = st[k].avg[key]; return `<td>${v == null ? "–" : r0(v) + unit}</td>`; }).join("")}</tr>`;
+    this.shadowRoot.innerHTML = `<style>${BASE_CSS}${NUTRI_CSS}
+        table { width:100%; border-collapse:collapse; font-variant-numeric:tabular-nums; }
+        th, td { padding:7px 4px; text-align:right; border-top:1px solid var(--hc-line); }
+        thead th { border-top:0; font-size:.75rem; color:var(--hc-muted); font-weight:600; }
+        tbody th { text-align:left; font-weight:500; } td { font-weight:600; }
+      </style>
+      <ha-card>
+        <div class="title">${esc(this._config.title || "Averages")}</div>
+        ${this._error ? `<div class="err">${esc(this._error)}</div>` : !st ? `<div class="muted small">Loading…</div>` : `
+          <table><thead><tr><th></th>${W.map(([, l]) => `<th>${l}</th>`).join("")}</tr></thead>
+          <tbody>${row("Calories", "kcal", "")}${row("Protein", "protein", " g")}${row("Carbs", "carbs", " g")}${row("Fat", "fat", " g")}${row("Fiber", "fiber", " g")}</tbody></table>
+          <div class="muted xsmall" style="margin-top:6px">Averages use days you logged food, not counting today.</div>`}
+      </ha-card>`;
+  }
+}
+
+/* ============================================ nutrition: last 14 days chart */
+class CalorieHistoryCard extends HACard {
+  static getStubConfig() { return {}; }
+  get refreshEvery() { return 5 * 60 * 1000; }
+  getCardSize() { return 4; }
+  getGridOptions() { return { columns: 6, rows: 4, min_columns: 6, min_rows: 3 }; }
+  hassChanged(h) { watchCalories(this, h); }
+
+  async refresh() {
+    try { this._st = await this.ws("food/stats"); this._error = null; }
+    catch (e) { this._error = e.message || String(e); }
+    this.render();
+  }
+
+  render() {
+    const st = this._st, cfg = this._config;
+    let body = this._error ? `<div class="err">${esc(this._error)}</div>` : `<div class="muted small">Loading…</div>`;
+    if (st && !this._error) {
+      const max = Math.max(st.target || 0, st.maintenance || 0, ...st.series.map((d) => d.kcal), 1) * 1.08;
+      const today = localDate();
+      const bars = st.series.map((d) => {
+        const overM = st.maintenance && d.kcal > st.maintenance;
+        const over = !overM && st.target && d.kcal > st.target * 1.1;
+        const dt = new Date(d.date + "T12:00:00");
+        return `<div class="bcol" title="${dt.toLocaleDateString(undefined, { month: "short", day: "numeric" })}: ${r0(d.kcal)} kcal${overM ? " · over maintenance" : ""}"><div class="bbar ${overM ? "overm" : over ? "over" : ""} ${d.date === today ? "today" : ""}" style="height:${(d.kcal / max) * 100}%"></div><span>${"SMTWTFS"[dt.getDay()]}</span></div>`;
+      }).join("");
+      const lines = (st.target ? `<div class="tline" style="bottom:${(st.target / max) * 100}%"><span>Target ${r0(st.target)}</span></div>` : "")
+        + (st.maintenance && Math.round(st.maintenance) !== Math.round(st.target || 0)
+          ? `<div class="tline mline" style="bottom:${(st.maintenance / max) * 100}%"><span>Maintenance ${r0(st.maintenance)}</span></div>` : "");
+      const legend = st.maintenance ? `<div class="blegend muted xsmall"><span><i class="sw"></i>Under target</span><span><i class="sw over"></i>Over target</span><span><i class="sw overm"></i>Over maintenance</span></div>` : "";
+      const fw = st.fat_week;
+      let fat = "";
+      if (cfg.show_fat_burned !== false && fw?.show) {
+        const imp = st.units !== "metric", f = (lb) => (imp ? lb : lb / LB), unit = imp ? "lb" : "kg";
+        const val = fw.deficit_kcal <= 0 ? `0<small> ${unit}</small>` : `${f(fw.lb_low).toFixed(2)}–${f(fw.lb_high).toFixed(2)}<small> ${unit}</small>`;
+        fat = `<div class="tile"><div class="muted small"><ha-icon icon="mdi:fire" style="--mdc-icon-size:16px;color:#ff9500;vertical-align:-3px"></ha-icon> Estimated fat burned this week</div><div class="big">${val}</div>
+          <div class="muted xsmall">${fw.deficit_kcal > 0 ? `${r0(fw.deficit_kcal)} kcal under maintenance` : `${r0(-fw.deficit_kcal)} kcal over maintenance`} · last 7 days (${fw.days_logged} logged)</div></div>`;
+      }
+      const tiles = cfg.show_streak !== false ? `<div class="tiles">
+          <div class="tile"><div class="muted small">Logging streak</div><div class="big">${st.streak}<small> day${st.streak === 1 ? "" : "s"}</small></div></div>
+          <div class="tile"><div class="muted small">On target · 30 days</div><div class="big">${st.d30.on_target_days ?? "–"}<small> / ${st.d30.days_logged}</small></div><div class="muted xsmall">within ±10%</div></div></div>` : "";
+      body = `<div class="bars"><div class="plot">${lines}${bars}</div></div>${legend}${fat}${tiles}`;
+    }
+    this.shadowRoot.innerHTML = `<style>${BASE_CSS}${NUTRI_CSS}
+        .bars { padding-bottom:18px; margin-top:16px; }
+        .plot { position:relative; display:flex; align-items:flex-end; gap:4px; height:130px; }
+        .bcol { flex:1; height:100%; display:flex; flex-direction:column; justify-content:flex-end; align-items:center; position:relative; }
+        .bcol span { position:absolute; bottom:-18px; font-size:.65rem; color:var(--hc-muted); }
+        .bbar { width:100%; max-width:22px; background:color-mix(in srgb, var(--hc-accent) 50%, transparent); border-radius:4px 4px 2px 2px; min-height:2px; }
+        .bbar.today { background:var(--hc-accent); } .bbar.over { background:#ff9500; } .bbar.overm { background:#ff3b30; }
+        .tline { position:absolute; left:0; right:0; border-top:1.5px dashed var(--hc-muted); opacity:.7; z-index:1; pointer-events:none; }
+        .tline span { position:absolute; right:0; top:-15px; font-size:.65rem; color:var(--hc-muted); }
+        .tline.mline { border-top-style:dotted; border-top-color:#ff3b30; } .tline.mline span { right:auto; left:0; color:#ff3b30; }
+        .blegend { display:flex; gap:12px; flex-wrap:wrap; margin-top:4px; }
+        .blegend .sw { display:inline-block; width:9px; height:9px; border-radius:2px; margin-right:4px; vertical-align:-1px; background:color-mix(in srgb, var(--hc-accent) 50%, transparent); }
+        .blegend .sw.over { background:#ff9500; } .blegend .sw.overm { background:#ff3b30; }
+        .tile { background:var(--hc-fill); border-radius:12px; padding:10px 12px; margin-top:10px; }
+        .tiles { display:grid; grid-template-columns:1fr 1fr; gap:10px; } .tiles .tile { margin-top:10px; }
+      </style>
+      <ha-card><div class="title">${esc(cfg.title || "Last 14 days")}</div>${body}</ha-card>`;
+  }
+}
+
+/* ===================================================== exercise progression */
+const METRICS = {
+  e1rm: { label: "Estimated 1RM" },
+  weight: { label: "Heaviest set" },
+  volume: { label: "Volume" },
+  reps: { label: "Most reps" },
+  duration_s: { label: "Longest" },
+  distance_m: { label: "Farthest" },
+};
+class ExerciseProgressCard extends HACard {
+  static getStubConfig() { return { exercise_name: "bench_press", time: 30 }; }
+  get refreshEvery() { return 15 * 60 * 1000; }
+  getCardSize() { return 4; }
+  getGridOptions() { return { columns: 6, rows: 4, min_columns: 4, min_rows: 3 }; }
+
+  setConfig(config) {
+    if (!config || !config.exercise_name) throw new Error("Add exercise_name, e.g. exercise_name: bench_press");
+    super.setConfig(config);
+    this._data = null;
+    if (this._hass) this.refresh();
+  }
+
+  /** time: a number of days, "30d", or all_time (the default). */
+  get _days() {
+    const t = String(this._config.time ?? "all_time").trim().toLowerCase();
+    if (!t || /^all/.test(t)) return null;
+    const n = parseInt(t, 10);
+    if (!n || n < 1) throw new Error(`time should be a number of days or all_time, not "${this._config.time}"`);
+    return n;
+  }
+
+  async refresh() {
+    try {
+      const days = this._days;
+      this._data = await this.ws("exercises/progress", { exercise: String(this._config.exercise_name), ...(days ? { days } : {}) });
+      this._error = null;
+    } catch (e) { this._error = e.message || String(e); }
+    this.render();
+  }
+
+  render() {
+    const d = this._data, cfg = this._config;
+    const title = cfg.title || d?.exercise?.name || String(cfg.exercise_name).replace(/_/g, " ");
+    let range = "";
+    try { range = this._days ? `Last ${this._days} days` : "All time"; } catch (_) { /* shown as error */ }
+    let body = this._error ? `<div class="err">${esc(this._error)}</div>` : `<div class="muted small">Loading…</div>`;
+    if (d && !this._error) {
+      const kind = d.exercise.kind || "weight_reps";
+      const metric = cfg.metric && METRICS[cfg.metric] ? cfg.metric
+        : kind === "duration" ? "duration_s" : kind === "distance" ? "distance_m" : kind === "weight_reps" ? "e1rm" : "reps";
+      const imp = d.units !== "metric";
+      const fmt = (v) => metric === "duration_s" ? `${Math.floor(v / 60)}:${pad(Math.round(v % 60))}`
+        : metric === "distance_m" ? `${r1(imp ? v / 1609.344 : v / 1000)} ${imp ? "mi" : "km"}`
+        : metric === "reps" ? `${r0(v)} reps`
+        : `${metric === "volume" ? r0(imp ? v * LB : v) : r1(imp ? v * LB : v)} ${imp ? "lb" : "kg"}`;
+      const pts = d.points.map((p) => ({ t: new Date(p.date).getTime(), v: p[metric] || 0, p })).filter((p) => p.v > 0);
+      if (!pts.length) {
+        body = `<div class="empty muted small">No ${esc(d.exercise.name)} sets ${this._days ? `in the last ${this._days} days` : "logged yet"}.</div>`;
+      } else {
+        const W = 320, H = 140, PL = 40, PR = 10, PT = 10, PB = 22;
+        const t0 = this._days ? Date.now() - this._days * 864e5 : pts[0].t, t1 = this._days ? Date.now() : pts[pts.length - 1].t;
+        let v0 = Math.min(...pts.map((p) => p.v)), v1 = Math.max(...pts.map((p) => p.v));
+        const padV = (v1 - v0) * 0.12 || v1 * 0.1 || 1; v0 = Math.max(0, v0 - padV); v1 += padV;
+        const sx = (t) => PL + (t1 === t0 ? (W - PL - PR) / 2 : ((t - t0) / (t1 - t0)) * (W - PL - PR));
+        const sy = (v) => PT + (1 - (v - v0) / (v1 - v0 || 1)) * (H - PT - PB);
+        const line = pts.map((p, i) => `${i ? "L" : "M"}${sx(p.t).toFixed(1)},${sy(p.v).toFixed(1)}`).join("");
+        const area = pts.length > 1 ? `${line}L${sx(pts[pts.length - 1].t).toFixed(1)},${H - PB}L${sx(pts[0].t).toFixed(1)},${H - PB}Z` : "";
+        const grid = [0, 0.5, 1].map((f) => { const v = v0 + (v1 - v0) * f, y = sy(v).toFixed(1);
+          return `<line x1="${PL}" x2="${W - PR}" y1="${y}" y2="${y}" class="grid"/><text x="${PL - 6}" y="${(+y + 3.5).toFixed(1)}" class="axis" text-anchor="end">${esc(fmt(v).replace(/ (lb|kg|reps|mi|km)$/, ""))}</text>`; }).join("");
+        const dlabel = (t) => new Date(t).toLocaleDateString(undefined, { month: "short", day: "numeric", ...(this._days ? {} : { year: "2-digit" }) });
+        const best = pts.reduce((a, b) => (b.v > a.v ? b : a));
+        const dots = pts.map((p) => `<circle cx="${sx(p.t).toFixed(1)}" cy="${sy(p.v).toFixed(1)}" r="${p === best ? 4.5 : 3}" class="dot ${p === best ? "best" : ""}"><title>${esc(dlabel(p.t))}: ${esc(fmt(p.v))} · ${p.p.sets} set${p.p.sets === 1 ? "" : "s"}</title></circle>`).join("");
+        const first = pts[0], last = pts[pts.length - 1], diff = last.v - first.v;
+        const change = pts.length > 1 ? `<span class="${diff > 0 ? "up" : diff < 0 ? "down" : "muted"}">${diff > 0 ? "▲" : diff < 0 ? "▼" : "="} ${esc(fmt(Math.abs(diff)))}</span> <span class="muted">since ${esc(dlabel(first.t))}</span>` : `<span class="muted">${esc(dlabel(last.t))}</span>`;
+        body = `<div class="head"><div><div class="muted xsmall">${esc(METRICS[metric].label)} · latest</div><div class="big">${esc(fmt(last.v))}</div></div>
+            <div class="right small">${change}<div class="muted xsmall">Best ${esc(fmt(best.v))} · ${pts.length} workout${pts.length === 1 ? "" : "s"}</div></div></div>
+          <svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(d.exercise.name)} ${esc(METRICS[metric].label)}">
+            ${grid}${area ? `<path d="${area}" class="area"/>` : ""}<path d="${line}" class="line"/>${dots}
+            <text x="${PL}" y="${H - 6}" class="axis">${esc(dlabel(t0))}</text><text x="${W - PR}" y="${H - 6}" class="axis" text-anchor="end">${esc(dlabel(t1))}</text>
+          </svg>`;
+      }
+    }
+    this.shadowRoot.innerHTML = `<style>${BASE_CSS}${NUTRI_CSS}
+        .title { display:flex; justify-content:space-between; gap:8px; } .title .muted { font-weight:400; font-size:.8rem; }
+        .head { display:flex; justify-content:space-between; align-items:flex-end; gap:8px; margin-bottom:4px; }
+        .right { text-align:right; } .up { color:#34c759; font-weight:600; } .down { color:#ff3b30; font-weight:600; }
+        svg { width:100%; display:block; overflow:visible; }
+        .grid { stroke:var(--hc-line); stroke-width:1; } .axis { font-size:9px; fill:var(--hc-muted); }
+        .line { fill:none; stroke:var(--hc-accent); stroke-width:2.2; stroke-linejoin:round; stroke-linecap:round; }
+        .area { fill:color-mix(in srgb, var(--hc-accent) 14%, transparent); }
+        .dot { fill:var(--card-background-color, #fff); stroke:var(--hc-accent); stroke-width:2; } .dot.best { fill:#ffcc00; stroke:#ff9500; }
+        .empty { padding:18px 0; text-align:center; }
+      </style>
+      <ha-card><div class="title"><span>${esc(title)}</span><span class="muted">${esc(range)}</span></div>${body}</ha-card>`;
+  }
+}
+
 const define = (name, cls) => { if (!customElements.get(name)) customElements.define(name, cls); };
 define("health-assistant-lift-calendar", LiftCalendarCard);
 define("health-assistant-calorie-gauge", CalorieGaugeCard);
 define("health-assistant-log-meal", LogMealCard);
 define("health-assistant-log-meal-dialog", LogMealDialog);
+define("health-assistant-nutrition-today", NutritionTodayCard);
+define("health-assistant-nutrition-averages", NutritionAveragesCard);
+define("health-assistant-calorie-history", CalorieHistoryCard);
+define("health-assistant-exercise-progress", ExerciseProgressCard);
 
 window.customCards = window.customCards || [];
 const add = (type, name, description) => { if (!window.customCards.some((c) => c.type === type)) window.customCards.push({ type, name, description, preview: true, documentationURL: "https://github.com/tjsanzen/health-assistant" }); };
 add("health-assistant-lift-calendar", "Health Assistant: Lifting calendar", "This month at a glance — days you lifted are circled in green.");
 add("health-assistant-calorie-gauge", "Health Assistant: Calories today", "Today's calories as a speedometer against your target.");
 add("health-assistant-log-meal", "Health Assistant: Log meal button", "A button that opens a dialog to log food.");
+add("health-assistant-nutrition-today", "Health Assistant: Calories & macros today", "Today's calorie ring with protein, carbs, fat and fiber bars.");
+add("health-assistant-nutrition-averages", "Health Assistant: Nutrition averages", "Average calories and macros over 7 days, 30 days and all time.");
+add("health-assistant-calorie-history", "Health Assistant: Last 14 days", "Daily calories against your target and maintenance, with fat burned this week.");
+add("health-assistant-exercise-progress", "Health Assistant: Exercise progress", "A graph of one exercise over time, e.g. exercise_name: bench_press, time: 30.");
 })();

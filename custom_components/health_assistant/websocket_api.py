@@ -292,6 +292,11 @@ def _exercise_history(hass, model, msg):
     return model.exercise_history(msg["exercise_id"])
 
 
+@command("exercises/progress", {vol.Required("exercise"): str, vol.Optional("days"): vol.Any(None, vol.All(int, vol.Range(min=1)))})
+def _exercise_progress(hass, model, msg):
+    return model.exercise_progress(msg["exercise"], msg.get("days"))
+
+
 @command("exercises/last", {vol.Required("exercise_ids"): [str]})
 def _exercise_last(hass, model, msg):
     return {eid: model.last_info(eid) for eid in msg["exercise_ids"]}
