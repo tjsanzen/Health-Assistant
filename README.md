@@ -18,7 +18,7 @@ Workout, Nutrition, and Health Datapoint logging inside of Home Assistant. Track
 
 ------
 
-<img src="images/live_activity_mobile.jpeg" alt="Nutrition Page"  style="vertical-align: left;"> <img src="images/workout_mobile.jpeg" alt="Nutrition Page"  style="vertical-align: right;">
+<img src="images/live_activity_mobile.jpeg" alt="Nutrition Page"  style="vertical-align: left; max-width: 30%;"> <img src="images/workout_mobile.jpeg" alt="Nutrition Page"  style="vertical-align: center;  max-width: 30%;"> <img src="images/learn_mobile.jpg" alt="Learn Page"  style="vertical-align: right;  max-width: 30%;">
 
 
 ## Installation
