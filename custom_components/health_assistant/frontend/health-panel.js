@@ -597,7 +597,37 @@ class HealthAssistantPanel extends HTMLElement {
         <div class="learnrow"><div><b>${esc(c.name)}</b>${c.brand ? ` <span class="muted small">${esc(c.brand)}</span>` : ""}
         <div class="muted small">Your highest-calorie regular this week: logged ${c.count} times at about ${r0(c.kcal_each)} kcal each (${r0(c.kcal_week)} kcal${c.share != null ? `, ${c.share}% of what you ate` : ""}).</div></div></div></div>` : "";
     return head + `<div class="card"><h3>${icon("mdi:food-apple-outline")} Dietary recommendations</h3>${diet}
-      </div>${cut}${this._lessonsHtml()}`;
+      </div>${this._observedHtml(L.observed)}${cut}${this._lessonsHtml()}`;
+  }
+
+  /** Maintenance calories worked out from a month of food logs and weigh-ins. */
+  _observedHtml(o) {
+    if (!o) return "";
+    const metric = o.units === "metric";
+    const amt = metric ? Math.abs(o.change_kg) : Math.abs(o.change_lb);
+    const unit = metric ? (amt === 1 ? "kilogram" : "kilograms") : (amt === 1 ? "pound" : "pounds");
+    const moved = o.direction === "steady"
+      ? `your weight held steady (${r1(amt)} ${unit} ${o.change_lb >= 0 ? "up" : "down"})`
+      : `${o.direction === "gain" ? "gained" : "lost"} ${r1(amt)} ${unit}`;
+    const m = o.maintenance, kc = (n) => `${r0(n)} calories`;
+    const notes = {
+      "lose:loss": ["On track", "Nice work: that's steady progress toward your goal. Keep eating around your current average and it should keep coming."],
+      "lose:gain": ["Check-in", `Your goal is to lose weight, but the scale went up a little. Eating closer to ${kc(m - 500)} a day would put you on pace for about 1 lb a week. If you've recently started lifting, some of this may be muscle or water rather than fat.`],
+      "lose:steady": ["Check-in", `Your weight has held about steady. To start losing, aim a little under your maintenance: about ${kc(m - 500)} a day for roughly 1 lb a week.`],
+      "gain:gain": ["On track", "Great progress toward your goal. If you're lifting, some of this gain is likely muscle, which takes fewer calories per pound to build than fat. That means your true maintenance may be a little higher than this estimate."],
+      "gain:loss": ["Check-in", `You're aiming to gain, but your weight went down. Eating a few hundred calories above ${kc(m)} a day should get the scale moving the right way.`],
+      "gain:steady": ["Check-in", `Your weight has held about steady. To start gaining, aim a little above your maintenance, around ${kc(m + 250)} to ${kc(m + 500)} a day.`],
+      "maintain:steady": ["On track", "Right where you want to be: you're holding steady."],
+      "maintain:gain": ["Check-in", `Your weight crept up a little. Eating closer to ${kc(m)} a day should keep it steady.`],
+      "maintain:loss": ["Check-in", `Your weight dipped a little. Eating closer to ${kc(m)} a day should keep it steady.`],
+    };
+    const [chip, note] = notes[`${o.goal}:${o.direction}`] || notes[`maintain:${o.direction}`];
+    const formula = o.formula_maintenance && Math.abs(o.formula_maintenance - m) >= 100
+      ? ` The calculation from your profile estimates ${kc(o.formula_maintenance)}, so your body may be burning ${m > o.formula_maintenance ? "more" : "less"} than the formula expects.` : "";
+    return `<div class="card observed ${o.tone}"><div class="row between"><h3>${icon("mdi:scale-bathroom")} Maintenance Calories</h3><span class="chip ${o.tone}">${chip}</span></div>
+      <p>Based on your weight and food tracking in the past month, we estimate your maintenance calorie point is <b>${r0(m)} calories per day</b>. You ate an average of ${r0(o.avg_kcal)} calories per day over the past 30 days and ${moved}.</p>
+      <p class="muted small">${esc(note)}${esc(formula)}</p>
+      <div class="muted xsmall">Weight change over ${o.days} days (${o.start_weigh_ins} + ${o.end_weigh_ins} weigh-ins averaged), at 3,600 calories per lb.</div></div>`;
   }
 
   _lessonsHtml() {
@@ -2149,6 +2179,10 @@ main { flex:1 1 auto; min-height:0; overflow-y:auto; -webkit-overflow-scrolling:
 .iconbtn.sm { width:32px; height:32px; }
 .iconbtn[disabled] { opacity:.3; }
 .linklike { text-align:left; }
+.observed p { margin:.5em 0; }
+.chip { font-size:.72rem; font-weight:600; padding:2px 9px; border-radius:999px; background:var(--hp-fill); color:var(--hp-muted); white-space:nowrap; }
+.chip.positive { background:color-mix(in srgb, #34c759 18%, transparent); color:#248a3d; }
+.chip.checkin { background:color-mix(in srgb, #ff9500 18%, transparent); color:#c26c00; }
 .lessons { display:flex; flex-direction:column; gap:8px; }
 .card.lesson { display:flex; align-items:center; gap:10px; text-align:left; width:100%; margin:0; cursor:pointer; color:inherit; font:inherit; }
 .card.lesson .lmain { flex:1; display:flex; flex-direction:column; gap:2px; }

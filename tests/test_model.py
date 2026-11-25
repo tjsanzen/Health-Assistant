@@ -410,3 +410,28 @@ def test_exercise_progress():
     assert allp["points"][0]["weight"] == 80 and allp["points"][-1]["sets"] == 2  # warm-up not counted
     assert len(m.exercise_progress("bench_press", 30)["points"]) == 2
     assert m.exercise_progress("tricep_pushdown_machine")["exercise"]["id"] == "tricep_pushdown"
+
+
+def test_observed_maintenance():
+    m, clock, _ = make()  # 80 kg now -> target 75 kg: goal "lose"
+    now = datetime(2026, 11, 9, 12)
+    m.data["vitals"] = [v for v in m.data["vitals"] if v["type"] != "weight"]
+    for back in range(1, 31):
+        clock.t = now - timedelta(days=back)
+        m.add_food({"name": "x", "kcal": 2000})
+    clock.t = now
+    assert m.observed_maintenance() is None  # no weigh-ins yet
+    m.add_vital("weight", {"value": 81.0}, recorded_at=(now - timedelta(days=31)).isoformat())
+    m.add_vital("weight", {"value": 81.2}, recorded_at=(now - timedelta(days=29)).isoformat())
+    assert m.observed_maintenance() is None  # nothing in the last week
+    m.add_vital("weight", {"value": 80.0}, recorded_at=(now - timedelta(days=2)).isoformat())
+    o = m.observed_maintenance()
+    span = 30 - 2
+    expect = 2000 - ((80.0 - 81.1) * 2.2046226218) * 3600 / span
+    assert abs(o["maintenance"] - expect) < 2 and o["direction"] == "loss" and o["tone"] == "positive"
+    assert o["avg_kcal"] == 2000 and o["start_weigh_ins"] == 2 and o["end_weigh_ins"] == 1
+    m.update_profile({"target_weight_kg": 90})  # now trying to gain: same loss is a check-in
+    assert m.observed_maintenance()["tone"] == "checkin"
+    m.data["food_log"] = [i for i in m.data["food_log"] if i["date"] != (now - timedelta(days=10)).date().isoformat()]
+    assert m.observed_maintenance() is None  # a missed day breaks the 30 in a row
+    assert "observed" in m.learn()

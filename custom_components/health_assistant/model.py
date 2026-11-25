@@ -40,6 +40,11 @@ LEARN_MIN_DAYS = 5          # logged days (of the last 7) before recommendations
 LEARN_FIBER_SHARE = 0.75    # under 75% of the fiber goal
 LEARN_LOW_KCAL_GAP = 750    # this far under maintenance per day is too low
 LEARN_FOOD_MIN_TIMES = 3
+OBS_FOOD_DAYS = 30             # observed maintenance: days of food logged in a row
+OBS_START_MIN, OBS_START_MAX = 25, 40   # days ago for the starting weigh-ins
+OBS_KCAL_PER_LB = 3600
+OBS_STEADY_LB = 1.0            # within ±1 lb counts as holding steady
+OBS_MIN_KCAL, OBS_MAX_KCAL = 1000, 6000
 FAT_WEEK_MIN_DAYS = 5          # logged days (of the last 7) before "fat burned this week" shows
 KCAL_PER_LB_FAT_LOW = 3436     # range used for the estimate
 KCAL_PER_LB_FAT_HIGH = 3752
@@ -468,7 +473,73 @@ class HealthModel:
             cut_back = {"name": g["name"], "brand": g["brand"], "count": g["count"],
                         "kcal_each": round(g["kcal"] / g["count"]), "kcal_week": round(g["kcal"]),
                         "share": round(g["kcal"] / week_kcal * 100) if week_kcal else None}
-        return {"days_logged": n, "min_days": LEARN_MIN_DAYS, "recommendations": recs, "cut_back": cut_back}
+        return {"days_logged": n, "min_days": LEARN_MIN_DAYS, "recommendations": recs, "cut_back": cut_back,
+                "observed": self.observed_maintenance()}
+
+    def observed_maintenance(self) -> dict | None:
+        """Maintenance calories from real data: what you ate vs. how your weight moved.
+
+        Shown only with 30 days of food logged in a row (the 30 finished days before today),
+        a weigh-in in the last 7 days and one 25–40 days ago. Each end is an average of
+        weigh-ins: all of the last 7 days, and the 7-day stretch in the 25–40 day window with
+        the most weigh-ins (ties: closest to 30 days ago). Weight change is turned into
+        calories at 3,600 kcal per lb, spread over the days between the two averages.
+        """
+        now = self._now()
+        today = now.date()
+        days = [(today - timedelta(days=b)).isoformat() for b in range(1, OBS_FOOD_DAYS + 1)]
+        kcal = {}
+        for i in self.data["food_log"]:
+            if i["date"] in days:
+                kcal[i["date"]] = kcal.get(i["date"], 0) + (i.get("kcal") or 0)
+        if len(kcal) < OBS_FOOD_DAYS:
+            return None
+
+        def when(v: dict) -> datetime:
+            d = datetime.fromisoformat(v["recorded_at"])
+            if (d.tzinfo is None) != (now.tzinfo is None):
+                d = d.replace(tzinfo=now.tzinfo)
+            return d
+
+        weights = [(when(v), v["value"]) for v in self.data["vitals"] if v["type"] == "weight" and v.get("value")]
+        age = lambda t: (now - t).total_seconds() / 86400
+        end = [(t, w) for t, w in weights if 0 <= age(t) <= 7]
+        early = sorted([(t, w) for t, w in weights if OBS_START_MIN <= age(t) <= OBS_START_MAX], key=lambda x: x[0])
+        if not end or not early:
+            return None
+        best = None
+        for t0, _ in early:  # each weigh-in starts a candidate 7-day stretch
+            group = [(t, w) for t, w in early if 0 <= (t - t0).total_seconds() / 86400 <= 7]
+            mid = sum(age(t) for t, _ in group) / len(group)
+            key = (len(group), -abs(mid - 30))
+            if best is None or key > best[0]:
+                best = (key, group)
+        start = best[1]
+        mean_t = lambda g: sum(age(t) for t, _ in g) / len(g)
+        span = mean_t(start) - mean_t(end)
+        if span < 14:
+            return None
+        w0 = sum(w for _, w in start) / len(start)
+        w1 = sum(w for _, w in end) / len(end)
+        change_lb = (w1 - w0) * LB_PER_KG
+        avg_kcal = sum(kcal.values()) / len(kcal)
+        maintenance = avg_kcal - change_lb * OBS_KCAL_PER_LB / span
+        if not OBS_MIN_KCAL <= maintenance <= OBS_MAX_KCAL:
+            return None  # usually a logging gap (missed snacks) or a scale glitch: don't guess
+        e = self.energy() or {}
+        goal = e.get("goal", "maintain")
+        direction = "gain" if change_lb >= OBS_STEADY_LB else "loss" if change_lb <= -OBS_STEADY_LB else "steady"
+        tone = ("positive" if (goal, direction) in {("lose", "loss"), ("gain", "gain"), ("maintain", "steady")}
+                else "checkin")
+        return {
+            "maintenance": round(maintenance), "avg_kcal": round(avg_kcal),
+            "change_lb": round(change_lb, 1), "change_kg": round(w1 - w0, 2), "days": round(span),
+            "start_weigh_ins": len(start), "end_weigh_ins": len(end),
+            "direction": direction, "goal": goal, "tone": tone,
+            "formula_maintenance": round(e["maintenance"]) if e.get("maintenance") else None,
+            "target": round(e["target"]) if e.get("target") else None,
+            "units": self.profile.get("units", "imperial"),
+        }
 
     def food_stats(self) -> dict:
         """Averages over logged days. Today is excluded because it isn't finished yet."""

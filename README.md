@@ -9,12 +9,14 @@ Workout, Nutrition, and Health Datapoint logging inside of Home Assistant. Track
 
 > **IMPORTANT NOTICE**
 > 
-> ⚠️ **This integration is _<ins>NOT</ins>_ able to run offline.**
-> Health Assistant requires a connection to your Home Assistant server to run. While most gyms have free wifi for members, please keep this in mind when using. This integration has been developed for web and the iOS companion app.
+> ⚠️ **This integration is _<ins>NOT</ins>_ able to run offline in the companion app.**
+> Health Assistant requires a connection to your Home Assistant server to run in the companion app. While most gyms have free wifi for members, please keep this in mind when using. This integration has been developed for web and the iOS companion app.
 
 ## Screenshots:
 
 <img src="images/nutrition_desktop.png" alt="Nutrition Page" style="vertical-align: middle;">
+
+------
 
 <img src="images/live_activity_mobile.jpeg" alt="Nutrition Page"  style="vertical-align: left;"> <img src="images/workout_mobile.jpeg" alt="Nutrition Page"  style="vertical-align: right;">
 
@@ -35,27 +37,27 @@ Workout, Nutrition, and Health Datapoint logging inside of Home Assistant. Track
 
 | Tab | What it does |
 | --- | --- |
-| **Learn** | Dietary recommendations from your last 7 days of food logs (once 5 days are logged): a nudge if fiber averages under 75% of your goal (14 g per 1,000 kcal), if calories average above maintenance, or if they average more than 750 kcal below it. It also flags the highest-calorie food you've logged 3+ times that week as one worth cutting back on. |
-| **Workout** | Start an empty workout, with **Templates**, **Workouts** (past workouts, previously the History tab) and **Records** underneath. Past workouts grouped by month (duration, volume, sets, PRs), workout detail, save a workout as a template, delete. A **Records** view shows per-exercise bests (heaviest, estimated 1RM, best set) and an e1RM trend. Start from a template, or empty. Each exercise has a **•••** menu (add warm-up set, update rest timer, replace exercise, create superset, remove exercise) and a Set / Previous / lbs / Reps / ✓ table. Tap a set number to make it a working set, warm-up (yellow), drop set (purple) or failure (red). Previous shows what you did on the same set last time. Typing reps into one set fills the blank sets below it. Ticking a set asks for effort (6–10), then starts that exercise's rest timer (default 2 min). Rest only starts after the last exercise of a superset. In-progress workouts are saved to HA, so you can start on your phone and finish on your laptop. |
-| **Nutrition** | Daily calorie ring and macro bars, meals (breakfast / lunch / dinner / snack), food search across ~327k OpenNutrition foods, recent foods, quick add, custom foods, edit and delete, previous days. Meals other than the current one collapse to a one-line summary once they have food; tap to expand. A blue **+** in a meal's header adds food when the meal is collapsed or has more than one item. An optional **barcode scanner** (turn it on in Profile) looks packages up in your custom foods first, then in OpenNutrition (about 313k foods have barcodes). New custom foods can store a barcode. Scanning uses the Home Assistant app's scanner on iPhone and Android, the camera in Chrome where the browser supports it, or typing the number. Stats: average calories/protein/carbs/fat over 7 days, 30 days and all time, a 14-day chart against your target, logging streak and days on target. On desktop the stats sit in a right-hand column. |
-| **Profile** | Weight progress toward your target with a trend chart, health-stat tiles (weight, body fat, BP, heart rate, HRV, SpO₂, respiration, height) with history, daily targets (calculated, or **set your own** calories and protein/carbs/fat), workout & rest-timer settings, and profile editing. |
+| **Learn** | A couple of conditional cards will pop-up with suggestions about your current data, otherwise has some lessons that I've written for users who might be new to working out or health tracking. If you want to modify them for all users, please reach out to me or open a request on GitHub, I'd love to collaborate. |
+| **Workout** | Allows you to log workouts, run rest timers, view history and records. |
+| **Nutrition** | Daily macros and calories tracking. I used the OpenNutrition database as my source, and will update it whenever it gets updated. However, you can also add custom foods. There is a barcode scanner, but it is hidden in settings and turned off by default, as research notes calorie tracking apps can make people over reliant on foods that are easy to track and manufactured. |
+| **Profile** | Weight progress toward your target with a trend chart, health-stat tiles (weight, body fat, BP, heart rate, HRV, SpO₂, respiration, height) with history, daily targets (calculated, or set your own calories and protein/carbs/fat), workout & rest-timer settings, and profile editing. |
 
 ## Setup and Sensors
 
-**Setup flow** asks for name, linked HA user, units, current and target weight, height, body fat % (optional), age, sex, average daily steps, weekly 1-hour lifting days and goal pace. It then shows your numbers before you confirm.
+**Setup flow** asks for name, linked HA user, units, current and target weight, height, body fat % (optional), age, sex, average daily steps, weekly 1-hour lifting days and goal pace. It then shows your numbers before you confirm, where you can change them if you'd like... however, I wouldn't recommend doing so unless you know what you are doing. I've spent a significant amount of time and research refining these calculations.
 
 **Sensors** (per profile): calories today/remaining, calorie target, maintenance, BMR, protein/carbs/fat today, weight, body fat, heart rate, blood pressure, last workout, workouts this week.
 
 ## Dashboard cards
 
-The integration loads these cards on every dashboard, so there's no resource to add. Find them under **Add card**, or add them in YAML:
+There are a number of built in cards that you can use for your own health and fitness dashboards. Something that would maybe be really cool on a smart display in a home gym. Find them under **Add card**, or add them in YAML:
 
 ```yaml
-type: custom:health-assistant-lift-calendar   # this month, days you lifted circled in green (‹ › to change month)
+type: custom:health-assistant-lift-calendar   # this month, days you lifted circled in green
 ---
 type: custom:health-assistant-calorie-gauge   # today's calories as a speedometer against your target
 ---
-type: custom:health-assistant-log-meal        # a button that opens a "Log a meal" dialog
+type: custom:health-assistant-log-meal        # a button that opens the "Log a meal" dialog
 name: Log meal                                # optional
 icon: mdi:silverware-fork-knife               # optional
 ---
@@ -69,43 +71,17 @@ show_streak: true                                 # optional, the streak and on-
 ---
 type: custom:health-assistant-exercise-progress   # one exercise over time
 exercise_name: bench_press                        # id or name; the closest match is used
-time: 30                                          # days, or all_time (the default)
-metric: e1rm                                      # optional: e1rm, weight, volume, reps, duration_s, distance_m
+time: 30                                          # days, or 'all_time'
+metric: e1rm                                      # optional: e1rm, weight, volume, reps
 ```
 
-- **Profile:** every card takes an optional `profile: Anna` (a profile name or id). By default it uses the profile linked to whoever is signed in.
+- **Profile:** every card takes an optional `profile: Name` (a profile name or id). By default it uses the profile linked to whoever is signed in, but if you have multiple users, this might be useful. 
 - **Title:** every card except the log-meal button takes an optional `title:`.
-- **Exercise progress:** one point per workout, from your best working set. Warm-ups don't count. The default metric is estimated 1RM for weighted lifts, reps for bodyweight exercises, and time or distance for cardio. The highest point is gold, and the header shows your latest value and the change since the first point in range. `exercise_name` accepts an id (`bench_press`), a name (`Bench Press`) or something close: `tricep_pushdown_machine` finds Tricep Pushdown.
+- **Exercise progress:** one point per workout, from your best working set (warm-ups don't count). The default metric is estimated 1RM for weighted lifts, reps for bodyweight exercises, and time or distance for cardio. The highest point is gold, and the header shows your latest value and the change since the first point in range. `exercise_name` accepts an id (`bench_press`), a name (`Bench Press`) or something close: `tricep_pushdown_machine` finds Tricep Pushdown if that makes sense.
 - **Nutrition cards:** the same views as the Nutrition tab's sidebar. They update when food is logged anywhere.
 - **Gauge colours:** blue up to 90% of your target, green within ±10%, red when you're over.
 - **Log a meal dialog:** OpenNutrition search, recent foods and Quick add, logged to the meal you pick.
 
-## Lessons (Learn tab)
-
-Put Markdown files in `custom_components/health_assistant/data/lessons/`. Each one shows up as a card under **Lessons** in the Learn tab, and tapping the card opens the article.
-
-- The title comes from the file name: `intro_to_nutrition.md` becomes **Intro to Nutrition**. A file that starts with its own `# Title` line uses that title in the article.
-- Cards are sorted by file name. Start names with a number (`01_…`, `02_…`) to choose the order; the number isn't shown.
-- The first paragraph is the card's description.
-- Images in the same folder can be linked by file name: `![Plate](plate.png)`.
-- Supported formatting: headings, bold, italic, code, lists, links, quotes, tables, images and dividers.
-- Edits show up the next time you open the Learn tab, without a restart.
-
-**Merge tags.** Lessons can include these tags, which are filled in with the reader's own numbers (examples are for a 176 lb profile lifting 3 days a week and losing 0.25 kg a week):
-
-| Tag | Shows | Example |
-| --- | --- | --- |
-| `{weight}` | Current weight | 176.4 lb |
-| `{mxcal}` | Maintenance calories | 2,473 kcal |
-| `{deficit}` | Maintenance minus 500 kcal (about 1 lb of fat loss a week) | 1,973 kcal |
-| `{carbs}` | Carb range for your training level | 265–441 g |
-| `{protein}` | Your protein rule (0.6 or 0.9 g/lb) up to 1.0 g/lb | 106–176 g |
-| `{fats}` | 20–35% of your calorie target | 49–85 g |
-| `{fiber}` | 14 g per 1,000 kcal, from your calorie target to maintenance | 31–35 g |
-
-Values include their unit, so write "about {mxcal} a day" rather than "{mxcal} calories". A tag shows "—" until there's enough data, for example before a weight is entered.
-
-`01_intro_to_nutrition.md` is a full example. HACS replaces the integration folder when it updates, so keep a copy of your own lessons outside it.
 
 ## More than one person
 
@@ -117,23 +93,21 @@ Each person gets their own profile, linked to their Home Assistant user. Whoever
 
 Non-admin users only ever see their own profile. Admins can switch between all profiles with the picker in the header. Each visit starts on your own profile, and a switch only lasts for that browser tab. A user with no linked profile is asked to have an admin set one up.
 
-Dashboard cards show the viewer's own profile unless the card sets `profile:`. For non-admin users, a card set to someone else's profile shows an error.
+Dashboard cards show the viewer's own profile unless the card sets `profile:`. For non-admin users, a card set to someone else's profile should show an error.
 
-## Importing your workout history (Strong)
+## Importing your workout history (Strong App)
 
-Profile → Settings → **Import workout history** → pick a CSV exported from the Strong app (Settings → Export Data).
+Profile → Settings → **Import workout history** → pick a CSV exported from the Strong app (Settings → Export Data). Currently only supports Strong because that is what I used prior to building this.
 
-- **Preview first:** you see how many workouts and sets are new, the date range, and how every Strong exercise name was matched. Nothing is saved until you press **Import**.
+- **Preview first:** you see how many workouts and sets are new, the date range, and how every Strong exercise name was matched, however nothing is saved until you press **Import**.
 - **Matching:** Strong's names are matched with a built-in table, for example "Bench Press (Barbell)" → Bench Press and "Seated Row (Cable)" → Seated Cable Row. Anything not in the table falls back to the closest library name. Anything still left becomes a custom exercise with its Strong name.
 - **What's kept:**
   - warm-up, failure and drop sets (W / F / D);
   - effort (RPE) and set notes;
   - the rest timer, used as each exercise's rest;
   - cardio distance and time.
-
-  Weights and distances are converted from your profile's units.
 - **Calories and PRs:** each imported workout gets calories from the engine, fitted to the workout's real length, and PRs judged against everything before it.
-- **Safe to re-run:** importing the same file again skips workouts already imported. **Remove all imported Strong workouts** undoes it without touching workouts you logged in Health Assistant.
+- **Safe to re-run:** importing the same file again skips workouts already imported. **Remove all imported Strong workouts** undoes it without touching workouts you logged in Health Assistant!
 
 ## Rest-over sound in your headphones
 
@@ -143,7 +117,7 @@ When a rest timer ends, Health Assistant sends your phone a notification with a 
 - **iPhone default sound**: the standard notification tone.
 - **No sound**: the Live Activity update only vibrates the phone.
 
-The notification is time-sensitive, so it gets through Focus modes. Each one is cleared when your next rest starts. The ring/silent switch still applies.
+The notification is time-sensitive, so it gets through Focus modes. I've only tested this on iPhone as that is all I have. 
 
 ## Steps from your phone (iPhone or Android)
 
@@ -161,7 +135,7 @@ When you pick your phone during setup, Health Assistant connects that phone's be
 - The Steps tile on the Profile tab shows today's count, your average and the last 30 days.
 - Sensors: `Steps today` and `Average steps`.
 
-If a sensor is missing, turn it on in the Companion app under Settings → Companion app → Sensors. On Android, the pedometer updates every 15 minutes by default; you can make it faster under Sensor Update Frequency.
+If a sensor is missing, turn it on in the Companion app under Settings → Companion app → Sensors. On Android, the pedometer updates every 15 minutes by default per documentation; you can make it faster under Sensor Update Frequency.
 
 ## How numbers are calculated
 
