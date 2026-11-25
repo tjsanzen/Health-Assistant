@@ -1,4 +1,4 @@
-# <img src="custom_components/health_assistant/brand/icon.png" alt="Logo" height="64" style="vertical-align: middle;"> Health Assistant
+# <img src="custom_components/health_assistant/brand/icon.png" alt="Logo" height="64" style="vertical-align: middle;"> Health Assistant v.1.0
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Home Assistant](https://img.shields.io/badge/Home%20Assistant-2025.2+-41BDF5.svg)](https://www.home-assistant.io/)
@@ -31,7 +31,7 @@ Workout, Nutrition, and Health Datapoint logging inside of Home Assistant. Track
 > <img src="images/cities.png" alt="BodySpec Cities" height="240" style="vertical-align: middle;"> 
 
 
-## What's in Health Assistant v0.2.1
+## What's in Health Assistant v1.0
 
 **Health Assistant** has four primary views, each serving a different function in your health journey. 
 
