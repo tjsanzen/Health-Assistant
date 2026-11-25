@@ -371,14 +371,15 @@ def test_learn_recommendations():
     clock.t = datetime(2026, 11, 9, 12)
     L = m.learn()
     kinds = {r["kind"] for r in L["recommendations"]}
-    assert L["days_logged"] == 5 and kinds == {"fiber_low", "kcal_high"}
+    assert L["days_logged"] == 5 and {"fiber_low", "kcal_high"} <= kinds  # sample food has no carbs/fat, so those flag too
     assert L["cut_back"]["name"] == "Pizza" and L["cut_back"]["count"] == 5
     m2, clock2, _ = make()
     for back in range(1, 6):
         clock2.t = datetime(2026, 11, 9, 12) - timedelta(days=back)
         m2.add_food({"name": "Salad", "kcal": maint - 900, "fiber": fiber})
     clock2.t = datetime(2026, 11, 9, 12)
-    assert [r["kind"] for r in m2.learn()["recommendations"]] == ["kcal_low"]
+    kinds2 = [r["kind"] for r in m2.learn()["recommendations"]]
+    assert "kcal_low" in kinds2 and "kcal_high" not in kinds2
 
 
 def test_custom_food_barcode():
@@ -435,3 +436,22 @@ def test_observed_maintenance():
     m.data["food_log"] = [i for i in m.data["food_log"] if i["date"] != (now - timedelta(days=10)).date().isoformat()]
     assert m.observed_maintenance() is None  # a missed day breaks the 30 in a row
     assert "observed" in m.learn()
+
+
+def test_learn_carbs_and_fat():
+    m, clock, _ = make()
+    e = m.energy()
+    kcal, carbs = round(e["target"]), e["carbs_g"]
+    for back in range(1, 6):  # low carb, high fat week at the calorie target
+        clock.t = datetime(2026, 11, 9, 12) - timedelta(days=back)
+        m.add_food({"name": "Steak and eggs", "kcal": kcal, "carbs": carbs * 0.3, "fat": kcal * 0.5 / 9, "fiber": e["fiber_g"]})
+    clock.t = datetime(2026, 11, 9, 12)
+    recs = {r["kind"]: r for r in m.learn()["recommendations"]}
+    assert set(recs) == {"carbs_low", "fat_high"}
+    assert recs["fat_high"]["pct"] == 50 and recs["carbs_low"]["goal"] == round(carbs)
+    m2, clock2, _ = make()
+    for back in range(1, 6):  # balanced week: nothing to flag
+        clock2.t = datetime(2026, 11, 9, 12) - timedelta(days=back)
+        m2.add_food({"name": "Balanced", "kcal": kcal, "carbs": carbs, "fat": kcal * 0.27 / 9, "fiber": e["fiber_g"]})
+    clock2.t = datetime(2026, 11, 9, 12)
+    assert m2.learn()["recommendations"] == []

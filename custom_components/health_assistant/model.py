@@ -40,6 +40,8 @@ LEARN_MIN_DAYS = 5          # logged days (of the last 7) before recommendations
 LEARN_FIBER_SHARE = 0.75    # under 75% of the fiber goal
 LEARN_LOW_KCAL_GAP = 750    # this far under maintenance per day is too low
 LEARN_FOOD_MIN_TIMES = 3
+LEARN_CARB_LOW_SHARE = 0.75   # carbs under 75% of the carb target
+LEARN_CARB_HIGH_SHARE = 1.25  # carbs over 125% of the target (and above the training range)
 OBS_FOOD_DAYS = 30             # observed maintenance: days of food logged in a row
 OBS_START_MIN, OBS_START_MAX = 25, 40   # days ago for the starting weigh-ins
 OBS_KCAL_PER_LB = 3600
@@ -433,9 +435,9 @@ class HealthModel:
         logs = [i for i in self.data["food_log"] if i["date"] in days]
         by_day: dict[str, dict] = {}
         for i in logs:
-            d = by_day.setdefault(i["date"], {"kcal": 0.0, "fiber": 0.0})
-            d["kcal"] += i.get("kcal") or 0
-            d["fiber"] += i.get("fiber") or 0
+            d = by_day.setdefault(i["date"], {"kcal": 0.0, "fiber": 0.0, "carbs": 0.0, "fat": 0.0})
+            for k in d:
+                d[k] += i.get(k) or 0
         n = len(by_day)
         energy = self.energy() or {}
         maintenance, fiber_goal = energy.get("maintenance"), energy.get("fiber_g")
@@ -455,6 +457,32 @@ class HealthModel:
                 recs.append({"kind": "kcal_low", "icon": "mdi:arrow-up-bold-circle-outline",
                              "title": "You may want to consider increasing your daily caloric intake.",
                              "avg": round(avg_kcal), "maintenance": round(maintenance)})
+            # Carbs: against your carb target (which already follows your training level).
+            avg_carbs = sum(v["carbs"] for v in by_day.values()) / n
+            carb_goal = energy.get("carbs_g")
+            carb_range = {"low": round(energy.get("carbs_low_g") or 0), "high": round(energy.get("carbs_high_g") or 0)}
+            if carb_goal and avg_carbs < carb_goal * LEARN_CARB_LOW_SHARE:
+                recs.append({"kind": "carbs_low", "icon": "mdi:bread-slice-outline",
+                             "title": "You may want to consider increasing your daily carbohydrate intake.",
+                             "avg": round(avg_carbs), "goal": round(carb_goal), **carb_range,
+                             "level": energy.get("carb_level")})
+            elif carb_goal and avg_carbs > max(carb_goal * LEARN_CARB_HIGH_SHARE, carb_range["high"]):
+                recs.append({"kind": "carbs_high", "icon": "mdi:bread-slice-outline",
+                             "title": "You may want to consider decreasing your daily carbohydrate intake.",
+                             "avg": round(avg_carbs), "goal": round(carb_goal), **carb_range,
+                             "level": energy.get("carb_level")})
+            # Fat: share of the calories you actually ate, against the usual 20–35%.
+            avg_fat = sum(v["fat"] for v in by_day.values()) / n
+            if avg_kcal > 0:
+                share = avg_fat * 9 / avg_kcal
+                fat = {"avg": round(avg_fat), "pct": round(share * 100),
+                       "pct_low": round(FAT_PCT_LOW * 100), "pct_high": round(FAT_PCT_HIGH * 100)}
+                if share < FAT_PCT_LOW:
+                    recs.append({"kind": "fat_low", "icon": "mdi:water-outline",
+                                 "title": "You may want to consider increasing your daily fat intake.", **fat})
+                elif share > FAT_PCT_HIGH:
+                    recs.append({"kind": "fat_high", "icon": "mdi:water-outline",
+                                 "title": "You may want to consider decreasing your daily fat intake.", **fat})
 
         # Highest-calorie food logged 3+ times this week (quick adds aren't a "food").
         groups: dict[str, dict] = {}

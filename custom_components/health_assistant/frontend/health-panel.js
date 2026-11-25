@@ -579,8 +579,17 @@ class HealthAssistantPanel extends HTMLElement {
     const L = s.learn;
     const head = this._head("Learn");
     if (!L) return head + `<div class="empty">Loading…</div>`;
+    const lvl = (r) => (r.level ? `${r.level.toLowerCase()} training` : "your training level");
     const text = (r) => r.kind === "fiber_low"
       ? `Over the past week you've averaged ${r1(r.avg)} g of fiber a day, below the USDA's ${r0(r.goal)} g.`
+      : r.kind === "carbs_low"
+        ? `Over the past 7 days, you've averaged ${r0(r.avg)} g of carbs a day, well below your target of ${r0(r.goal)} g. Carbs are your body's main fuel; for ${lvl(r)} the recommended range is ${r0(r.low)}–${r0(r.high)} g.`
+      : r.kind === "carbs_high"
+        ? `Over the past 7 days, you've averaged ${r0(r.avg)} g of carbs a day, above your target of ${r0(r.goal)} g and the ${r0(r.low)}–${r0(r.high)} g range for ${lvl(r)}.`
+      : r.kind === "fat_low"
+        ? `Over the past 7 days, fat made up ${r.pct}% of your calories (${r0(r.avg)} g a day), below the recommended ${r.pct_low}–${r.pct_high}%. Fat helps your body make hormones and absorb vitamins A, D, E and K.`
+      : r.kind === "fat_high"
+        ? `Over the past 7 days, fat made up ${r.pct}% of your calories (${r0(r.avg)} g a day), above the recommended ${r.pct_low}–${r.pct_high}%.`
       : r.kind === "kcal_high"
         ? `Over the past 7 days, you've averaged ${r0(r.avg)} calories, above your maintenance amount of ${r0(r.maintenance)}.`
         : `Over the past 7 days, you've averaged ${r0(r.avg)} calories, more than 750 below your maintenance amount of ${r0(r.maintenance)}.`;
@@ -588,7 +597,7 @@ class HealthAssistantPanel extends HTMLElement {
     if (L.days_logged < L.min_days) {
       diet = `<p class="muted">Log food on at least ${L.min_days} of the last 7 days to get recommendations. You've logged ${L.days_logged} so far.</p>`;
     } else if (!L.recommendations.length) {
-      diet = `<div class="learnrow ok">${icon("mdi:check-circle-outline")}<div><b>Looking good.</b><div class="muted small">Your calories and fiber over the past 7 days are on track.</div></div></div>`;
+      diet = `<div class="learnrow ok">${icon("mdi:check-circle-outline")}<div><b>Looking good.</b><div class="muted small">Your calories and macros this week are looking good!</div></div></div>`;
     } else {
       diet = L.recommendations.map((r) => `<div class="learnrow ${r.kind}">${icon(r.icon)}<div><b>${esc(r.title)}</b><div class="muted small">${esc(text(r))}</div></div></div>`).join("");
     }
@@ -2205,6 +2214,8 @@ main { flex:1 1 auto; min-height:0; overflow-y:auto; -webkit-overflow-scrolling:
 .learnrow > ha-icon { flex:0 0 auto; margin-top:1px; color:#ff9500; }
 .learnrow.ok > ha-icon { color:#34c759; } .learnrow.fiber_low > ha-icon { color:#34c759; }
 .learnrow.kcal_high > ha-icon { color:#ff3b30; } .learnrow.kcal_low > ha-icon { color:#007aff; }
+.learnrow.carbs_low > ha-icon, .learnrow.carbs_high > ha-icon { color:#ff9500; }
+.learnrow.fat_low > ha-icon, .learnrow.fat_high > ha-icon { color:#af52de; }
 .seg { display:flex; background:var(--hp-fill); border-radius:10px; padding:2px; margin-bottom:14px; }
 .seg button { flex:1; padding:7px; border-radius:8px; color:var(--hp-text); font-weight:500; font-size:.9rem; }
 .seg button.on { background:var(--hp-card); box-shadow:0 1px 3px rgba(0,0,0,.12); font-weight:600; }
