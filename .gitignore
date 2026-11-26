@@ -1,8 +1,41 @@
-# Raw source export (~280 MB, over GitHub's 100 MB limit) — rebuild foods.db from it locally
-opennutrition_foods.tsv
+# Only what Home Assistant / HACS needs to run the integration, plus what the README shows.
+# Everything else at the top level is ignored by default (allow-list below).
+/*
+!/.gitignore
+!/.gitattributes
+!/README.md
+!/LICENSE
+!/hacs.json
+!/custom_components/
+!/images/
+
+# README images: only the ones README.md uses. Add a line here when you add a picture to it.
+/images/*
+!/images/cities.png
+!/images/learn_mobile.jpg
+!/images/live_activity_mobile.jpeg
+!/images/nutrition_desktop.png
+!/images/workout_mobile.jpeg
+
+# Inside the integration
+# Raw OpenNutrition export (~280 MB, over GitHub's 100 MB limit); foods.db is built from it
+custom_components/health_assistant/data/opennutrition_foods.tsv
 *.db.tmp
-dev/dev_data.json
+*.db-journal
+*.db-wal
+*.db-shm
+
+# Python, editor and OS clutter, anywhere
 __pycache__/
+*.py[cod]
 .pytest_cache/
+.mypy_cache/
+.ruff_cache/
 .venv/
+venv/
+.vscode/
+.idea/
+*.swp
+*.log
 .DS_Store
+Thumbs.db
